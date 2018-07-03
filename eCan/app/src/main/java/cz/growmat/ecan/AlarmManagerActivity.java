@@ -32,7 +32,7 @@ public class AlarmManagerActivity extends Activity {
 	public static final String PREFS_NAME_CHANNEL_NO = "CHANNEL_NO";
 	public static final String PREFS_NAME_TALKBACK_ID = "TALKBACK_ID";
 	public static final String PREFS_NAME_TALKBACK_API_KEY = "TALKBACK_API_KEY";
-
+	public static final String PREFS_NAME_ALARM_UP = "ALARM_UP";
 
 	ToggleButton tButton;
 	TextView twAlarm, twStatus, twTemperature;
@@ -61,6 +61,7 @@ public class AlarmManagerActivity extends Activity {
 		String channelNo = settings.getString(PREFS_NAME_CHANNEL_NO, "");
 		String talkbackId = settings.getString(PREFS_NAME_TALKBACK_ID, "");
 		String talkbackApiKey = settings.getString(PREFS_NAME_TALKBACK_API_KEY, "");
+		boolean alarmUp = settings.getBoolean(PREFS_NAME_ALARM_UP, false);
 		((EditText)findViewById(R.id.editText2)).setText(channelNo);
 		((EditText)findViewById(R.id.editText3)).setText(talkbackId);
 		((EditText)findViewById(R.id.editText4)).setText(talkbackApiKey);
@@ -70,10 +71,8 @@ public class AlarmManagerActivity extends Activity {
 		NotificationManager mNotificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
 		mNotificationManager.cancel(9011);
 
-		boolean alarmUp = (PendingIntent.getBroadcast(context, 0,
-				new Intent(context, AlarmManagerBroadcastReceiver.class),
-				PendingIntent.FLAG_NO_CREATE) != null);
 
+		//boolean alarmUp = (PendingIntent.getBroadcast(context, 0, new Intent(context, AlarmManagerBroadcastReceiver.class), PendingIntent.FLAG_NO_CREATE) != null);
 		tButton.setChecked(alarmUp);
 
 		refresh();
@@ -143,6 +142,7 @@ public class AlarmManagerActivity extends Activity {
 		String channelNo = ((EditText)findViewById(R.id.editText2)).getText().toString();
 		String talkbackId = ((EditText)findViewById(R.id.editText3)).getText().toString();
 		String talkbackApiKey = ((EditText)findViewById(R.id.editText4)).getText().toString();
+		SharedPreferences.Editor editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
         switch (view.getId()) {
 
 
@@ -153,6 +153,9 @@ public class AlarmManagerActivity extends Activity {
                 else
                     cancelRepeatingTimer(view);
             	}
+
+				editor.putBoolean(PREFS_NAME_ALARM_UP, tButton.isChecked());
+				editor.apply();
             	break;
             case R.id.buttonLoff:
                 GrowmatUtils.sendCommand("A0", talkbackId, talkbackApiKey);
@@ -173,7 +176,7 @@ public class AlarmManagerActivity extends Activity {
                 GrowmatUtils.sendCommand("BA", talkbackId, talkbackApiKey);
 				break;
 			case R.id.buttonSave:
-				SharedPreferences.Editor editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+				//SharedPreferences.Editor editor = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
 				editor.putString(PREFS_NAME_CHANNEL_NO, channelNo);
 				editor.putString(PREFS_NAME_TALKBACK_ID, talkbackId);
 				editor.putString(PREFS_NAME_TALKBACK_API_KEY, talkbackApiKey);

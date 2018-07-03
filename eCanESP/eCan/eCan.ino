@@ -128,7 +128,7 @@ bool checkin = false;
 #define ARDUINO_RUNNING_CORE 1
 #endif
 
-bool error =false;
+bool errorConn =false;
 
 #ifndef ESP8266
 // OLED pins to ESP32 GPIOs via this connection:
@@ -160,7 +160,7 @@ void msOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
   if(isAP)
 	  display->drawString(0, 0, "AP");
   else {
-	  if(error)
+	  if(errorConn)
 		  display->drawString(0, 0, "OFFLIN");
 	  else
 		  display->drawString(0, 0, "ONLINE");
@@ -1158,7 +1158,7 @@ void loop1(void *pvParameters) {
 #else
 	if(1) {
 #endif
-		 error = true;
+		 errorConn = true;
 		 //drawMessage(&display, String(millis()));
 
 		 if(!isAP) {
@@ -1212,10 +1212,10 @@ void loop1(void *pvParameters) {
 #endif
 					  if(httpCode != 200) {
 						  errorCounter++;
-						  error = true;
+						  errorConn = true;
 					  }
 					  else {
-						  error = false;
+						  errorConn = false;
 					  }
 
 
@@ -1280,10 +1280,10 @@ void loop1(void *pvParameters) {
 #endif
 				  if(httpCode != 200) {
 					  errorCounter++;
-					  error = true;
+					  errorConn = true;
 				  }
 				  else {
-					  error = false;
+					  errorConn = false;
 				  }
 
 				  if (httpCode > 0) { //Check the returning code

@@ -32,7 +32,6 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/HTTPClient/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/NTPClient}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Timezone}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Timezone/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Update}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Update/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/WebServer}&quot;"/>
@@ -66,7 +65,6 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/HTTPClient/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/NTPClient}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Timezone}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Timezone/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Update}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Update/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/WebServer}&quot;"/>
@@ -100,7 +98,6 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/HTTPClient/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/NTPClient}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Timezone}&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Timezone/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Update}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/Update/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/eCan/libraries/WebServer}&quot;"/>
@@ -140,7 +137,11 @@
 		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
 	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.core.LanguageSettingsProviders"/>
-	<storageModule moduleId="refreshScope"/>
+	<storageModule moduleId="refreshScope" versionNumber="2">
+		<configuration configurationName="Release">
+			<resource resourceType="PROJECT" workspacePath="/eCan"/>
+		</configuration>
+	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.make.core.buildtargets"/>
 	<storageModule moduleId="org.eclipse.cdt.internal.ui.text.commentOwnerProjectMappings"/>
 </cproject>

@@ -2,7 +2,7 @@
 //This is a automatic generated file
 //Please do not modify this file
 //If you touch this file your change will be overwritten during the next build
-//This file has been generated on 2018-07-01 18:30:30
+//This file has been generated on 2018-07-02 18:14:29
 
 #include "Arduino.h"
 #include "Arduino.h"
@@ -50,7 +50,7 @@ extern IPAddress deviceIP;
 extern bool isAP;
 extern bool checkin;
 #define ARDUINO_RUNNING_CORE 1
-extern bool error;
+extern bool errorConn;
 #define OLED_ADDRESS 0x3c
 #define OLED_SDA 5
 #define OLED_SCL 4
