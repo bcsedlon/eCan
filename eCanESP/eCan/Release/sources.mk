@@ -45,6 +45,7 @@ libraries/ESPmDNS/src \
 libraries/FS/src \
 libraries/HTTPClient/src \
 libraries/OLED \
+libraries/SD/src \
 libraries/SPI/src \
 libraries/Update/src \
 libraries/WebServer/src \

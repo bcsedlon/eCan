@@ -34,6 +34,10 @@ WebServer server(80);
 #include <ArduinoOTA.h>
 #include <EEPROM.h>
 
+#include <FS.h>
+#include "libraries/SD/src/SD.h"
+#include <SPI.h>
+
 //WiFiManager wifiManager;
 /*
 ESP8266
@@ -65,10 +69,10 @@ DallasTemperature oneWireSensors(&oneWire);
 #define CONFIG_WIFI_PIN 27//17 //D6 //5 //D1
 #define INPUT1_PIN 14 //D7 //4 //D2
 
-#define OUTPUT0_PIN 32
-#define OUTPUT1_PIN 33
-#define OUTPUT2_PIN 25
-#define OUTPUT3_PIN 26
+#define OUTPUT0_PIN 26 //32
+#define OUTPUT1_PIN 25 //33
+#define OUTPUT2_PIN 33 //25
+#define OUTPUT3_PIN 32 //26
 
 //#define DHT_PIN 12 //D2 //9//6
 #ifdef DHT_PIN
@@ -98,6 +102,42 @@ Timezone CE(CEST, CET);
 
 #define SAMPLES 16
 
+
+bool loadFromSdCard(String path){
+  String dataType = "text/plain";
+  /*
+  if(path.endsWith("/")) path += "index.htm";
+  if(path.endsWith(".src")) path = path.substring(0, path.lastIndexOf("."));
+  else if(path.endsWith(".htm")) dataType = "text/html";
+  else if(path.endsWith(".css")) dataType = "text/css";
+  else if(path.endsWith(".js")) dataType = "application/javascript";
+  else if(path.endsWith(".png")) dataType = "image/png";
+  else if(path.endsWith(".gif")) dataType = "image/gif";
+  else if(path.endsWith(".jpg")) dataType = "image/jpeg";
+  else if(path.endsWith(".ico")) dataType = "image/x-icon";
+  else if(path.endsWith(".xml")) dataType = "text/xml";
+  else if(path.endsWith(".pdf")) dataType = "application/pdf";
+  else if(path.endsWith(".zip")) dataType = "application/zip";
+  */
+  File dataFile = SD.open(path.c_str());
+  //if(dataFile.isDirectory()){
+  //  path += "/index.htm";
+  //  dataType = "text/html";
+  //  dataFile = SD.open(path.c_str());
+  //}
+
+  if (!dataFile)
+    return false;
+  //if (server.hasArg("download")) dataType = "application/octet-stream";
+
+  if (server.streamFile(dataFile, dataType) != dataFile.size()) {
+    Serial.println("Sent less data than expected!");
+  }
+
+  dataFile.close();
+  return true;
+}
+
 float analogRead(int pin, int samples) {
 	float r = 0;
 	for(int i = 0; i < samples; i++)
@@ -121,6 +161,9 @@ IPAddress deviceIP;
 
 bool isAP;
 bool checkin = false;
+
+#define SD_CS_PIN 22
+bool isSD, errorSD;
 
 #if CONFIG_FREERTOS_UNICORE
 #define ARDUINO_RUNNING_CORE 0
@@ -328,7 +371,7 @@ char* htmlFooter = "<hr><a href=/settings>SYSTEM SETTINGS</a></body></html>";
 //const char HTTP_STYLE[] PROGMEM  = "<style>.c{text-align: center;} div,input{padding:5px;font-size:1em;} input{width:95%;} body{text-align: center;font-family:verdana;} button{border:0;border-radius:0.3rem;background-color:#1fa3ec;color:#fff;line-height:2.4rem;font-size:1.2rem;width:100%;} .q{float: right;width: 64px;text-align: right;} .l{background: url(\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAALVBMVEX///8EBwfBwsLw8PAzNjaCg4NTVVUjJiZDRUUUFxdiZGSho6OSk5Pg4eFydHTCjaf3AAAAZElEQVQ4je2NSw7AIAhEBamKn97/uMXEGBvozkWb9C2Zx4xzWykBhFAeYp9gkLyZE0zIMno9n4g19hmdY39scwqVkOXaxph0ZCXQcqxSpgQpONa59wkRDOL93eAXvimwlbPbwwVAegLS1HGfZAAAAABJRU5ErkJggg==\") no-repeat left center;background-size: 1em;}</style>";
 const char* serverIndex = "<form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='update'><input type='submit' value='Update'></form>";
 
-const char* www_username = "admin";
+const char* www_username = "eCAN";
 //const char* www_password = "admin";
 char www_password[20];
 
@@ -557,15 +600,27 @@ void setup() {
   Serial.begin(115200);
   Serial.print("\n\n");
   Serial.println("eCAN");
+
 #ifndef ESP8266
   analogReadResolution(9);
-
   display.init();
   display.setFont(ArialMT_Plain_24);
   display.setTextAlignment(TEXT_ALIGN_LEFT);
   display.drawString(0, 0, "eCAN");
   display.display();
 #endif
+
+
+  isSD = true;
+  if(!SD.begin(SD_CS_PIN)) {
+	  isSD = false;
+      Serial.println("Card Mount Failed");
+  }
+  uint8_t cardType = SD.cardType();
+  if(cardType == CARD_NONE){
+	  isSD = false;
+	  Serial.println("No SD card attached");
+  }
 
 #ifdef LCD
   display.begin();
@@ -617,7 +672,7 @@ void setup() {
 	  writeApiKey[0] = '/0';
 	  talkbackID = 0;
 	  talkbackApiKey[0] = '/0';
-	  strcpy(www_password, "admin") ;
+	  strcpy(www_password, "eCan") ;
 	  saveApi();
 	  saveInstruments();
   }
@@ -635,8 +690,10 @@ void setup() {
   pinMode(CONFIG_WIFIAP_PIN, INPUT_PULLUP);
 #endif
 
+#ifdef INPUT1_PIN
   pinMode(CONFIG_WIFI_PIN, INPUT_PULLUP);
   pinMode(INPUT1_PIN, INPUT_PULLUP);
+#endif
 
 #ifdef RFTX_PIN
   pinMode(RFTX_PIN, OUTPUT);
@@ -677,74 +734,52 @@ void setup() {
 
   //if(digitalRead(CONFIG_WIFIAP_PIN) == HIGH) {
 
-#ifdef CONFIG_WIFIAP_PIN
-  if(digitalRead(CONFIG_WIFIAP_PIN) == LOW) {
-#else
-  if(false) {
-#endif
 
-	  isAP = true;
-	  strcpy(www_password, "admin") ;
 
+  //if(0) {
+  if ( digitalRead(CONFIG_WIFI_PIN) == LOW ) {
+  //if ( digitalRead(CONFIG_WIFI_PIN) == HIGH ) {
 #ifdef LED0_PIN
 	  digitalWrite(LED0_PIN, HIGH);
 #endif
 
+	  Serial.println("Starting AP for reconfiguration ...");
 #ifndef ESP8266
-	  drawMessage(&display, "WIFI AP...");
+	  drawMessage(&display, "CONFIG WIFI!");
 	  drawDisplay(&display,  0);
 #endif
-	  startWiFiAP();
-#ifndef ESP8266
-	  drawMessage(&display, "WIFI AP");
-#endif
+	  wifiManager.resetSettings();
+	  wifiManager.startConfigPortal("eCAN");
   }
   else {
 
-	  //if(0) {
-	  if ( digitalRead(CONFIG_WIFI_PIN) == LOW ) {
-	  //if ( digitalRead(CONFIG_WIFI_PIN) == HIGH ) {
-#ifdef LED0_PIN
-		  digitalWrite(LED0_PIN, HIGH);
-#endif
-
-		  Serial.println("Starting AP for reconfiguration ...");
+	  isAP = true;
+	  Serial.println("Starting AP or connecting to Wi-Fi ...");
+	  for(int i = 0; i < 3; i++) {
 #ifndef ESP8266
-		  drawMessage(&display, "CONFIG WIFI!");
-		  drawDisplay(&display,  0);
+		  drawMessage(&display, "CONN WIFI ... " + String(i));
 #endif
-		  wifiManager.resetSettings();
-      	  wifiManager.startConfigPortal("eCAN");
-      }
-  	  else {
-
-  		  isAP = true;
-  		  Serial.println("Starting AP or connecting to Wi-Fi ...");
-  		  for(int i = 0; i < 3; i++) {
+		  if(wifiManager.autoConnect()) {
+			  isAP = false;
+			  Serial.print("IP address: ");
+			  Serial.println(WiFi.localIP());
 #ifndef ESP8266
-  			  drawMessage(&display, "CONN WIFI ... " + String(i));
+			  drawMessage(&display, "CONN WIFI");
 #endif
-  			  if(wifiManager.autoConnect()) {
-  				  isAP = false;
-  				  Serial.print("IP address: ");
-  				  Serial.println(WiFi.localIP());
-#ifndef ESP8266
-  				  drawMessage(&display, "CONN WIFI");
-#endif
-  				  break;
-  			  }
-  			  Serial.println(wifiManager.getSSID());
-  			  Serial.println(wifiManager.getPassword());
-  		  }
-
-  		  if(isAP) {
-				startWiFiAP();
+			  break;
 		  }
+		  Serial.println(wifiManager.getSSID());
+		  Serial.println(wifiManager.getPassword());
+	  }
+
+	  if(isAP) {
+			startWiFiAP();
+	  }
 #ifdef LED1_PIN
-  		  digitalWrite(LED1_PIN, HIGH);
+	  digitalWrite(LED1_PIN, HIGH);
 #endif
-  	  }
   }
+
 
   Serial.println("Ready");
   WiFi.printDiag(Serial);
@@ -840,7 +875,9 @@ void setup() {
     	message += "</a>";
     }
     //message += "</body></html>";
+
     message += "<hr><h3>SYSTEM</h3>";
+    message += "<hr><a href=/logs>LOGS</a>";
     message += "<hr><a href=./save>SAVE INSTRUMENTS!</a>";
     message += htmlFooter;
     server.send(200, "text/html", message);
@@ -856,6 +893,72 @@ void setup() {
 	  server.send(200, "text/html", message);
    });
    */
+
+  server.on("/log", [](){
+  	  Serial.println("/log");
+  	  Serial.println(server.args());
+        if(!server.authenticate(www_username, www_password))
+      	  return server.requestAuthentication();
+      if(server.args() > 0)
+    	  loadFromSdCard(server.arg(0));
+  });
+
+  server.on("/logs", [](){
+	  Serial.println("/logs");
+      if(!server.authenticate(www_username, www_password))
+    	  return server.requestAuthentication();
+
+      String message = htmlHeader;
+
+
+      //Serial.printf("Listing directory: %s\n", dirname);
+
+	  File root = SD.open("/");
+	  if(!root){
+		  Serial.println("Failed to open directory");
+		  return;
+	  }
+	  if(!root.isDirectory()){
+		  Serial.println("Not a directory");
+		  return;
+	  }
+
+	  message += "<table>";
+	  File file = root.openNextFile();
+	  while(file){
+		  if(file.isDirectory()){
+			  Serial.print("  DIR : ");
+			  Serial.println(file.name());
+			  //if(levels){
+			  //  listDir(fs, file.name(), levels -1);
+		  }
+		  else {
+			  Serial.print("  FILE: ");
+			  Serial.print(file.name());
+			  Serial.print("  SIZE: ");
+			  Serial.println(file.size());
+
+			  message += "<tr><td><a href=/log?name=";
+			  message += file.name();
+			  message += ">";
+			  message += file.name();
+			  message += "</a></td><td>";
+			  message += String(file.size());
+			  message += "</td></tr>";
+
+		  }
+		  file = root.openNextFile();
+	  }
+	  message += "</table>";
+	  Serial.printf("Total space: %lluMB\n", SD.totalBytes() / (1024 * 1024));
+	  Serial.printf("Used space: %lluMB\n", SD.usedBytes() / (1024 * 1024));
+
+
+
+	  message += htmlFooter;
+	  server.send(200, "text/html", message);
+
+  });
 
   server.on("/save", [](){
       Serial.println("/save");
@@ -1140,6 +1243,15 @@ void setup() {
   });
   ArduinoOTA.begin();
 
+  if ( digitalRead(CONFIG_WIFI_PIN) == LOW ) {
+	  //emergency restore OTA
+	  while(true) {
+		  ArduinoOTA.handle();
+		  server.handleClient();
+	  }
+  }
+
+
 #ifndef ESP8266
   xTaskCreatePinnedToCore(loop1, "loop1", 4096, NULL, 1, NULL, ARDUINO_RUNNING_CORE);
 #else
@@ -1151,6 +1263,13 @@ void setup() {
 
 int frameWait = 0;
 int frameNo = 0;
+
+String int2string(int i) {
+	if(i < 10)
+		return "0" + String(i);
+	return String(i);
+}
+
 void loop1(void *pvParameters) {
 
 #ifndef ESP8266
@@ -1161,10 +1280,61 @@ void loop1(void *pvParameters) {
 		 errorConn = true;
 		 //drawMessage(&display, String(millis()));
 
+		 if(isSD) {
+#ifndef ESP8266
+  			  drawMessage(&display, "SD LOGGING...");
+#endif
+
+  			 int fileIndex = 10;
+  			 String path = "/" + String(fileIndex) + ".csv";
+			 //char* path = "/log1.csv";
+			 //String message = timeClient.getFormattedTime() + String(bitRead(devices[2].flags, OUTPUT_BIT) | bitRead(devices[3].flags, OUTPUT_BIT)) +  ';' + String(level) + ';' + String(bitRead(devices[0].flags, OUTPUT_BIT)) + ';' + String(bitRead(devices[1].flags, OUTPUT_BIT)) + '\n';;
+  			 time_t t = CE.toLocal(timeClient.getEpochTime());
+  			 String message = String(year(t)) + "-" + int2string(month(t)) + "-" + int2string(day(t)) + " " + int2string(hour(t)) + ":" + int2string(minute(t)) + ":" + int2string(second(t)) + ";" + String(bitRead(devices[3].flags, OUTPUT_BIT) | bitRead(devices[4].flags, OUTPUT_BIT)) +  ';' + String(level) + ';' + String(bitRead(devices[0].flags, OUTPUT_BIT)) + ';' + String(bitRead(devices[1].flags, OUTPUT_BIT)) + '\n';;
+  			 Serial.println(message);
+
+			 errorSD = false;
+			 if(!SD.exists(path)) {
+				 File file = SD.open(path, FILE_APPEND);
+				 if(file) {
+					 file.print("DATETIME;ALARM;LEVEL[mm];VALVE A;VALVE B\n");
+					 file.close();
+				 }
+				 else {
+					 Serial.println("Failed to create file");
+				 }
+			 }
+			 File file = SD.open(path, FILE_APPEND);
+			 if(!file){
+				 Serial.println("Failed to open file for appending");
+			     //return;
+			 }
+			 if(!file) {
+				 errorSD = true;
+			 }
+
+			 if(file) {
+			     if(file.print(message)){
+			    	 //errorSD = false;
+			         //Serial.println("Message appended");
+			     }
+			     else {
+			    	 errorSD = true;
+			         Serial.println("Append failed");
+			     }
+			     file.close();
+			 }
+#ifndef ESP8266
+			 if(errorSD)
+				 drawMessage(&display, "SD ERROR");
+			 else
+				 drawMessage(&display, "SD DONE");
+#endif
+		 }
+
+
+
 		 if(!isAP) {
-
-
-
 
 #ifndef ESP8266
 			  drawMessage(&display, "CONNECTING ...");
@@ -1840,14 +2010,31 @@ void loop() {
 		digitalWrite(LED0_PIN, not(bitRead(devices[3].flags, OUTPUT_BIT) | bitRead(devices[4].flags, OUTPUT_BIT)));
 #endif
 
+		if(digitalRead(CONFIG_WIFI_PIN) == LOW) {
+			if(bitRead(devices[0].flags, OUTPUT_BIT)) {
+				bitClear(devices[0].flags, MANUAL_BIT);
+				bitClear(devices[0].flags, OUTPUT_BIT);
+			}
+			else {
+				bitSet(devices[0].flags, MANUAL_BIT);
+				bitSet(devices[0].flags, OUTPUT_BIT);
+			}
+		}
 		if(digitalRead(INPUT1_PIN) == LOW) {
-
+			if(bitRead(devices[1].flags, OUTPUT_BIT)) {
+				bitClear(devices[1].flags, MANUAL_BIT);
+				bitClear(devices[1].flags, OUTPUT_BIT);
+			}
+			else {
+				bitSet(devices[1].flags, MANUAL_BIT);
+				bitSet(devices[1].flags, OUTPUT_BIT);
+			}
 		}
 
 
 #ifdef OUTPUT0_PIN
-		digitalWrite(OUTPUT0_PIN, not(bitRead(devices[0].flags, OUTPUT_BIT) | (digitalRead(CONFIG_WIFI_PIN) == LOW)));
-		digitalWrite(OUTPUT1_PIN, not(bitRead(devices[1].flags, OUTPUT_BIT) | (digitalRead(INPUT1_PIN) == LOW)));
+		digitalWrite(OUTPUT0_PIN, not(bitRead(devices[0].flags, OUTPUT_BIT))); //| (digitalRead(CONFIG_WIFI_PIN) == LOW)));
+		digitalWrite(OUTPUT1_PIN, not(bitRead(devices[1].flags, OUTPUT_BIT))); //| (digitalRead(INPUT1_PIN) == LOW)));
 
 		digitalWrite(OUTPUT3_PIN, not(bitRead(devices[3].flags, OUTPUT_BIT) | bitRead(devices[4].flags, OUTPUT_BIT)));
 #endif
