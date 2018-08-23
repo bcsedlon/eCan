@@ -2,7 +2,7 @@
 //This is a automatic generated file
 //Please do not modify this file
 //If you touch this file your change will be overwritten during the next build
-//This file has been generated on 2018-07-10 21:08:15
+//This file has been generated on 2018-08-23 18:10:57
 
 #include "Arduino.h"
 #include "Arduino.h"
@@ -19,6 +19,7 @@
 #include "libraries/OLED/OLEDDisplayUi.h"
 #include "images.h"
 extern WebServer server;
+#include <PubSubClient.h>
 #include <WiFiClient.h>
 #include <DNSServer.h>
 #include <WiFiUdp.h>
@@ -30,10 +31,15 @@ extern WebServer server;
 #define LED0_PIN 16
 #define CONFIG_WIFI_PIN 27
 #define INPUT1_PIN 14
+#define INPUT2_PIN 2
+#define INPUT3_PIN 15
 #define OUTPUT0_PIN 26
 #define OUTPUT1_PIN 25
 #define OUTPUT2_PIN 33
 #define OUTPUT3_PIN 32
+extern WiFiClient espClient;
+extern PubSubClient client;
+extern std::atomic_flag mqttLock;
 extern WiFiUDP ntpUDP;
 extern NTPClient timeClient;
 extern int reconnectTimeout;
@@ -41,12 +47,29 @@ extern TimeChangeRule CEST;
 extern TimeChangeRule CET;
 extern Timezone CE;
 #define DEVICES_NUM 8
+#define DEV_ALARM_MAX 5
+#define DEV_ALARM_MIN  6
+#define DEV_LEV_CAL    7
 #define OUTPUT_BIT 0
 #define MANUAL_BIT 1
 #define CMD_BIT 2
 #define UNACK_BIT 3
 #define RUNONCE_BIT 4
+#define PREVOUTPUT_BIT 5
 #define SAMPLES 16
+#define ROOT_TOPIC		"ecan/"
+#define LEVEL_VAL_TOPIC	"/level/val"
+#define LEVEL_MAX_TOPIC	"/level/max"
+#define LEVEL_MIN_TOPIC	"/level/min"
+#define A_VAL_TOPIC 	"/A/val"
+#define A_CMP_TOPIC     "/A/cmd"
+#define B_VAL_TOPIC 	"/B/val"
+#define B_CMP_TOPIC     "/B/cmd"
+#define C_VAL_TOPIC 	"/C/val"
+#define C_CMP_TOPIC     "/C/cmd"
+#define D_VAL_TOPIC 	"/D/val"
+#define D_CMP_TOPIC     "/D/cmd"
+extern char msg[];
 extern float level;
 extern unsigned long valveOpenSecCounters[];
 extern IPAddress deviceIP;
@@ -74,10 +97,10 @@ extern char* htmlFooter;
 extern const char* serverIndex;
 extern const char* www_username;
 extern char www_password[];
-extern char serverName[];
-extern char writeApiKey[];
-extern unsigned int talkbackID;
-extern char talkbackApiKey[];
+extern char mqttServer[];
+extern char mqttUser[];
+extern char mqttPassword[];
+extern unsigned int mqttID;
 extern HTTPClient http;
 extern int httpCode;
 extern unsigned int errorCounter;
@@ -97,12 +120,20 @@ extern RCSwitch rcSwitch;
 
 bool loadFromSdCard(String path);
 float analogRead(int pin, int samples) ;
+void receivedCallback(char* topic, byte* payload, unsigned int length) ;
+void mqttconnect() ;
 void msOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) ;
 void drawFrame1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
 void drawFrameA1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
+void drawFrameA2(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
+void drawFrameA3(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
+void drawFrameA4(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
+void drawFrameA5(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
 String deviceToString(struct Device device);
 void drawFrameD1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
 void drawFrameD2(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
+void drawFrameD3(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
+void drawFrameD4(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
 void drawFrameM1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
 void drawDisplay(OLEDDisplay *display) ;
 void drawDisplay(OLEDDisplay *display, int frame) ;
@@ -113,6 +144,7 @@ void saveApi() ;
 void saveInstruments() ;
 void startWiFiAP() ;
 void setup() ;
+void drawNextFrame(OLEDDisplay *display) ;
 String int2string(int i) ;
 void loop1(void *pvParameters) ;
 void loop() ;

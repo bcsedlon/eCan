@@ -28,6 +28,7 @@ WebServer server(80);
 //const char* host = "esp32-webupdate";
 #endif
 
+#include <PubSubClient.h>
 #include <WiFiClient.h>
 #include <DNSServer.h>
 #include <WiFiUdp.h>
@@ -68,6 +69,8 @@ DallasTemperature oneWireSensors(&oneWire);
 
 #define CONFIG_WIFI_PIN 27//17 //D6 //5 //D1
 #define INPUT1_PIN 14 //D7 //4 //D2
+#define INPUT2_PIN 2 //35 //D7 //4 //D2
+#define INPUT3_PIN 15 //34 //D7 //4 //D2
 
 #define OUTPUT0_PIN 26 //32
 #define OUTPUT1_PIN 25 //33
@@ -83,6 +86,11 @@ DallasTemperature oneWireSensors(&oneWire);
 DHT dht(DHT_PIN, 11);
 #endif
 
+/* create an instance of PubSubClient client */
+WiFiClient espClient;
+PubSubClient client(espClient);
+std::atomic_flag mqttLock = ATOMIC_FLAG_INIT;
+
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
 int reconnectTimeout = 0;
@@ -93,14 +101,35 @@ TimeChangeRule CET = {"CET ", Last, Sun, Oct, 3, 60};       //Central European S
 Timezone CE(CEST, CET);
 
 #define DEVICES_NUM 8
+#define DEV_ALARM_MAX 5
+#define DEV_ALARM_MIN  6
+#define DEV_LEV_CAL    7
 
 #define OUTPUT_BIT 0
 #define MANUAL_BIT 1
 #define CMD_BIT 2
 #define UNACK_BIT 3
 #define RUNONCE_BIT 4
+#define PREVOUTPUT_BIT 5
 
 #define SAMPLES 16
+
+//const char* mqtt_server = "broker.hivemq.com";//"iot.eclipse.org";
+//const char* mqtt_server = "iot.eclipse.org";
+#define ROOT_TOPIC		"ecan/"
+#define LEVEL_VAL_TOPIC	"/level/val"
+#define LEVEL_MAX_TOPIC	"/level/max"
+#define LEVEL_MIN_TOPIC	"/level/min"
+#define A_VAL_TOPIC 	"/A/val"
+#define A_CMP_TOPIC     "/A/cmd" /* 1=on, 0=off */
+#define B_VAL_TOPIC 	"/B/val"
+#define B_CMP_TOPIC     "/B/cmd" /* 1=on, 0=off */
+#define C_VAL_TOPIC 	"/C/val"
+#define C_CMP_TOPIC     "/C/cmd" /* 1=on, 0=off */
+#define D_VAL_TOPIC 	"/D/val"
+#define D_CMP_TOPIC     "/D/cmd" /* 1=on, 0=off */
+//long lastMsg = 0;
+char msg[20];
 
 
 bool loadFromSdCard(String path){
@@ -147,16 +176,16 @@ float analogRead(int pin, int samples) {
 }
 
 struct Device {
-	byte par1;
-	byte par2;
-	byte par3;
-	byte par4;
-	byte flags;
-	char name[8];
+	int par1;
+	int par2;
+	int par3;
+	int par4;
+	int flags;
+	char name[16];
 } devices[DEVICES_NUM];
 
 float level, k, d;
-unsigned long valveOpenSecCounters[2];
+unsigned long valveOpenSecCounters[DEVICES_NUM];
 IPAddress deviceIP;
 
 bool isAP;
@@ -182,6 +211,78 @@ bool errorConn =false;
 
 SSD1306 display(OLED_ADDRESS, OLED_SDA, OLED_SCL);
 //OLEDDisplayUi ui( &display );
+
+void receivedCallback(char* topic, byte* payload, unsigned int length) {
+  Serial.print("MQTT TOPIC: ");
+  Serial.print(topic);
+
+  Serial.print(" PAYLOAD: ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+
+  //Serial.println(strstr(topic, A_CMP_TOPIC)!= NULL);
+  int i = -1;
+  if(strstr(topic, A_CMP_TOPIC))
+	  i = 0;
+  if(strstr(topic, B_CMP_TOPIC))
+  	  i = 1;
+  if(strstr(topic, C_CMP_TOPIC))
+  	  i = 2;
+  if(strstr(topic, D_CMP_TOPIC))
+  	  i = 3;
+  if(i > -1) {
+	  if((char)payload[0]=='0') {
+		  bitClear(devices[i].flags, OUTPUT_BIT);
+		  bitSet(devices[i].flags, MANUAL_BIT);
+	  }
+	  else if((char)payload[0]=='1') {
+		  bitSet(devices[i].flags, OUTPUT_BIT);
+		  bitSet(devices[i].flags, MANUAL_BIT);
+	  }
+	  //else if((char)payload[0])=='A') {
+	  //	  bitClear(devices[0].flags, RUNONCE_BIT);
+	  //	  bitClear(devices[0].flags, MANUAL_BIT);
+	  //}
+  }
+
+  if ((char)payload[0] == '1') {
+	  /* we got '1' -> on */
+	  //digitalWrite(led, HIGH);
+  } else {
+	  /* we got '0' -> on */
+	  //digitalWrite(led, LOW);
+  }
+
+}
+
+void mqttconnect() {
+  /* Loop until reconnected */
+  int i = 0;
+  while (!client.connected()) {
+	  	yield();
+		Serial.print("MQTT connecting ...");
+		/* client ID */
+		String clientId = "eCAN";
+		/* connect now */
+		if (client.connect(clientId.c_str())) {
+		  Serial.println("connected");
+		  /* subscribe topic with default QoS 0*/
+		  client.subscribe(String(ROOT_TOPIC + String(mqttID) + "/#").c_str());
+		} else {
+		  Serial.print("failed, status code =");
+		  Serial.println(client.state());
+		  //Serial.println("try again in 5 seconds");
+		  /* Wait 5 seconds before retrying */
+		  delay(1000);
+		}
+		if(i++ >= 2)
+			break;
+		}
+}
+
+
 
 void msOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
   display->setTextAlignment(TEXT_ALIGN_RIGHT);
@@ -274,14 +375,55 @@ void drawFrameA1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int
 	  display->drawString(64 + x, 32 + y, "   ");
 
 }
+void drawFrameA2(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+	 if(!bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT)) {
+		 drawNextFrame(display);
+		 return;
+	 }
+	 display->setFont(ArialMT_Plain_16);
+	 display->setTextAlignment(TEXT_ALIGN_LEFT);
+	 display->drawString(0 + x, 16 + y, "ALARM");
+     display->drawString(0 + x, 32 + y, "LEVEL MAX");
+}
+void drawFrameA3(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+	 if(!bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT)) {
+		 drawNextFrame(display);
+		 return;
+	 }
+	 display->setFont(ArialMT_Plain_16);
+	 display->setTextAlignment(TEXT_ALIGN_LEFT);
+	 display->drawString(0 + x, 16 + y, "ALARM");
+     display->drawString(0 + x, 32 + y, "LEVEL MIN");
+}
+void drawFrameA4(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+	 if(!errorSD) {
+		 drawNextFrame(display);
+		 return;
+	 }
+	 display->setFont(ArialMT_Plain_16);
+	 display->setTextAlignment(TEXT_ALIGN_LEFT);
+	 display->drawString(0 + x, 16 + y, "ALARM");
+     display->drawString(0 + x, 32 + y, "SD CARD ERR");
+}
+void drawFrameA5(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+	 if(!errorConn) {
+		 drawNextFrame(display);
+		 return;
+	 }
+	 display->setFont(ArialMT_Plain_16);
+	 display->setTextAlignment(TEXT_ALIGN_LEFT);
+	 display->drawString(0 + x, 16 + y, "ALARM");
+     display->drawString(0 + x, 32 + y, "INTERNET ERR");
+}
 
 String deviceToString(struct Device device){
-	return String(bitRead(device.flags, MANUAL_BIT) ? "MAN " : "AUTO ")  + String(bitRead(device.flags, OUTPUT_BIT) ? "ON" : "OFF");
+	//return String(bitRead(device.flags, MANUAL_BIT) ? "MAN " : "AUTO ")  + String(bitRead(device.flags, OUTPUT_BIT) ? "ON" : "OFF");
+	return String(bitRead(device.flags, OUTPUT_BIT) ? "OPEN" : "CLOSE");
 }
 void drawFrameD1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   display->setFont(ArialMT_Plain_16);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
-  display->drawString(0 + x, 16 + y, "VALVE A");
+  display->drawString(0 + x, 16 + y,"A: " + String(devices[0].name));//"VALVE A");
   //display->setFont(ArialMT_Plain_24);
   display->setFont(ArialMT_Plain_16);
   display->drawString(0 + x, 32 + y, deviceToString(devices[0]));
@@ -289,10 +431,26 @@ void drawFrameD1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int
 void drawFrameD2(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   display->setFont(ArialMT_Plain_16);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
-  display->drawString(0 + x, 16 + y, "VALVE B");
+  display->drawString(0 + x, 16 + y, "B: " + String(devices[1].name));//"VALVE B");
   //display->setFont(ArialMT_Plain_24);
   display->setFont(ArialMT_Plain_16);
   display->drawString(0 + x, 32 + y, deviceToString(devices[1]));
+}
+void drawFrameD3(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+  display->setFont(ArialMT_Plain_16);
+  display->setTextAlignment(TEXT_ALIGN_LEFT);
+  display->drawString(0 + x, 16 + y, "C: " + String(devices[2].name));//"VALVE B");
+  //display->setFont(ArialMT_Plain_24);
+  display->setFont(ArialMT_Plain_16);
+  display->drawString(0 + x, 32 + y, deviceToString(devices[2]));
+}
+void drawFrameD4(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+  display->setFont(ArialMT_Plain_16);
+  display->setTextAlignment(TEXT_ALIGN_LEFT);
+  display->drawString(0 + x, 16 + y, "D: " + String(devices[3].name));//"VALVE B");
+  //display->setFont(ArialMT_Plain_24);
+  display->setFont(ArialMT_Plain_16);
+  display->drawString(0 + x, 32 + y, deviceToString(devices[3]));
 }
 
 void drawFrameM1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
@@ -313,10 +471,10 @@ void drawFrameM1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int
 
 // This array keeps function pointers to all frames
 // frames are the single views that slide in
-FrameCallback frames[] = { drawFrame1, drawFrameA1, drawFrameD1, drawFrameD2, drawFrameM1};
+FrameCallback frames[] = { drawFrame1, drawFrameA2, drawFrameA3, drawFrameA4, drawFrameA5, drawFrameD1, drawFrameD2, drawFrameD3, drawFrameD4, drawFrameM1};
 
 // how many frames are there?
-int frameCount = 5;
+int frameCount = 10;
 
 // Overlays are statically drawn on top of a frame eg. a clock
 OverlayCallback overlays[] = { msOverlay };
@@ -328,6 +486,7 @@ String lastMessage;
 void drawDisplay(OLEDDisplay *display) {
 	drawDisplay(display, lastFrameNo);
 }
+
 
 void drawDisplay(OLEDDisplay *display, int frame) {
 	lastFrameNo = frame;
@@ -341,9 +500,25 @@ void drawDisplay(OLEDDisplay *display, int frame) {
 
 	display->setFont(ArialMT_Plain_16);
 	display->setTextAlignment(TEXT_ALIGN_LEFT);
-	display->drawString(0, 48, lastMessage);
+	//display->drawString(0, 48, lastMessage);
 
-
+	for(int i = 0; i < 4; i++) {
+		if(bitRead(devices[i].flags, OUTPUT_BIT)) {
+			char ch = 65 + i;
+			display->drawString(12 * i, 48, String(ch));
+		}
+	}
+	if(errorConn | errorSD) {
+		display->setTextAlignment(TEXT_ALIGN_RIGHT);
+		display->drawString(128, 48, "ALM");
+		display->setTextAlignment(TEXT_ALIGN_LEFT);
+	}
+	/*for(int i = 0; i < 4; i++) {
+		display->drawString(25 * i, 0, String(i));
+		display->drawXbm(25 * i, 0, 25, 25, dropSymbol);
+		if(!bitRead(devices[i].flags, OUTPUT_BIT))
+			display->drawXbm(25 * i, 0, 25, 25, crossSymbol);
+	}*/
 	display->display();
 }
 void drawMessage(OLEDDisplay *display, String msg) {
@@ -367,7 +542,7 @@ const char* update_path = "/firmware";
 
 
 char* htmlHeader = "<html><head><title>eCAN</title><meta name=\"viewport\" content=\"width=device-width\"><style type=\"text/css\">button {height:100px;width:100px;font-family:monospace;border-radius:5px;}</style></head><body><h1><a href=/>eCAN</a></h1>";
-char* htmlFooter = "<hr><a href=/settings>SYSTEM SETTINGS</a></body></html>";
+char* htmlFooter = "<hr><a href=./save>SAVE INSTRUMENTS!</a><hr><a href=/settings>SYSTEM SETTINGS</a></body></html>";
 //const char HTTP_STYLE[] PROGMEM  = "<style>.c{text-align: center;} div,input{padding:5px;font-size:1em;} input{width:95%;} body{text-align: center;font-family:verdana;} button{border:0;border-radius:0.3rem;background-color:#1fa3ec;color:#fff;line-height:2.4rem;font-size:1.2rem;width:100%;} .q{float: right;width: 64px;text-align: right;} .l{background: url(\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAALVBMVEX///8EBwfBwsLw8PAzNjaCg4NTVVUjJiZDRUUUFxdiZGSho6OSk5Pg4eFydHTCjaf3AAAAZElEQVQ4je2NSw7AIAhEBamKn97/uMXEGBvozkWb9C2Zx4xzWykBhFAeYp9gkLyZE0zIMno9n4g19hmdY39scwqVkOXaxph0ZCXQcqxSpgQpONa59wkRDOL93eAXvimwlbPbwwVAegLS1HGfZAAAAABJRU5ErkJggg==\") no-repeat left center;background-size: 1em;}</style>";
 const char* serverIndex = "<form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='update'><input type='submit' value='Update'></form>";
 
@@ -375,10 +550,17 @@ const char* www_username = "eCAN";
 //const char* www_password = "admin";
 char www_password[20];
 
+#ifdef THINGSSPEAK
 char serverName[20];
 char writeApiKey[20];
 unsigned int talkbackID;
 char talkbackApiKey[20];
+#endif
+
+char mqttServer[20];
+char mqttUser[20];
+char mqttPassword[20];
+unsigned int mqttID;
 
 HTTPClient http;  //Declare an object of class HTTPClient
 int httpCode;
@@ -456,7 +638,7 @@ bool secOverflow;
 //12 //D5
 //14 //D6
 
-
+#define EEPROM_FILANEME_ADDR 124
 #define EEPROM_OFFSET 128 //64 //8
 
 /*
@@ -474,28 +656,32 @@ String getDeviceForm(int i, struct Device devices[]) {
 	String s = "<form action=/dev><input type=hidden name=id value=";
 	s += i;
 	s += "><h2>";
-	s += i;
+	s += char( i+ 65);
 	s += ": ";
 	s += String(d.name);
-	if(bitRead(devices[i].flags, MANUAL_BIT))
-		s += " MANUAL";
-	else
-		s += " AUTO";
-	if(bitRead(devices[i].flags, OUTPUT_BIT))
-		s += " ON";
-	else
-		s += " OFF";
+	if(i<DEV_ALARM_MAX) {
+		//if(bitRead(devices[i].flags, MANUAL_BIT))
+		//	s += " MANUAL";
+		//else
+		//	s += " AUTO";
+		if(bitRead(devices[i].flags, OUTPUT_BIT))
+			s += " OPEN";
+		else
+			s += " CLOSE";
+
+	}
 	s += "</h2>";
 
-	if(i<3)
-		s += "<button type=submit name=cmd value=off>OFF</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=on>ON</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=auto>AUTO</button>";
+	if(i<DEV_ALARM_MAX) {
+		s += "<button type=submit name=cmd value=off>CLOSE</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=on>OPEN</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=auto>AUTO</button>";
+	}
 	s += "<hr><h3>SETTINGS:</h3>";
 	s += "<hr>NAME<br>";
-	//s += "<input name=n value=";
-	//s += d.name;
-	//s += ">";
+	s += "<input name=name value=\"";
 	s += d.name;
-	if(i == 0 || i == 1) {
+	s += "\">";
+	//s += d.name;
+	if(i < DEV_ALARM_MAX) {
 		s += "<hr>OPEN AT [HOUR]<br><input name=par1 value=";
 		s += d.par1;
 		s += "><hr>OPEN AT [MINUTE]<br><input name=par2 value=";
@@ -506,36 +692,33 @@ String getDeviceForm(int i, struct Device devices[]) {
 		s += d.par4;
 		s += ">";
 	}
-	if(i==2) {
+	if(i==DEV_ALARM_MAX) {
+			s += "<hr>VALVES OPEN LEVEL [mm]<br><input name=par1 value=";
+			s += d.par1;
+			//s += "><hr>VALVES OPEN LEVEL [mm]<br><input name=par2 value=";
+			//s += d.par2;
+			s += "><hr><br>ALARM MAX LEVEL [mm]<br><input name=par3 value=";
+			s += d.par3;
+			s += "><hr><br>ALARM HYST [mm]<br><input name=par4 value=";
+			s += d.par4;
+			s += ">";
 	}
-	if(i==3) {
-		s += "<hr>VALVE A CLOSE LEVEL [mm]<br><input name=par1 value=";
+	if(i==DEV_ALARM_MIN) {
+		s += "<hr>VALVES CLOSE LEVEL [mm]<br><input name=par1 value=";
 		s += d.par1;
-		s += "><hr>VALVE B CLOSE LEVEL [mm]<br><input name=par2 value=";
-		s += d.par2;
+		//s += "><hr>VALVE CLOSE LEVEL [mm]<br><input name=par2 value=";
+		//s += d.par2;
 		s += "><hr><br>ALARM MIN LEVEL [mm]<br><input name=par3 value=";
 		s += d.par3;
 		s += "><hr><br>ALARM HYST [mm]<br><input name=par4 value=";
 		s += d.par4;
 		s += ">";
 	}
-	if(i==4) {
-		s += "<hr>VALVE A OPEN LEVEL [mm]<br><input name=par1 value=";
-		s += d.par1;
-		s += "><hr>VALVE B OPEN LEVEL [mm]<br><input name=par2 value=";
-		s += d.par2;
-		s += "><hr><br>ALARM MAX LEVEL [mm]<br><input name=par3 value=";
-		s += d.par3;
-		s += "><hr><br>ALARM HYST [mm]<br><input name=par4 value=";
-		s += d.par4;
-		s += ">";
-	}
-	if(i==5) {
-	}
-	if(i==6) {
+
+	if(i==DEV_LEV_CAL) {
 		s += "<hr>X0 [-]<br><input name=par1 value=";
 		s += d.par1;
-		s += "><hr>Y100 [-]<br><input name=par2 value=";
+		s += "><hr>X100 [-]<br><input name=par2 value=";
 		s += d.par2;
 		s += "><hr>Y0 [mm]<br><input name=par3 value=";
 		s += d.par3;
@@ -563,6 +746,9 @@ bool led1;
 
 void saveApi() {
 	int offset = 8;
+	EEPROM.put(offset, www_password);
+	offset += sizeof(www_password);
+#ifdef THINGSSPEAK
 	EEPROM.put(offset, serverName);
 	offset += sizeof(serverName);
 	EEPROM.put(offset, writeApiKey);
@@ -571,9 +757,20 @@ void saveApi() {
 	offset += sizeof(talkbackApiKey);
 	EEPROM.put(offset, talkbackID);
 	offset += sizeof(talkbackID);
-	EEPROM.put(offset, www_password);
+#endif
+	EEPROM.put(offset, mqttServer);
+	offset += sizeof(mqttServer);
+	EEPROM.put(offset, mqttUser);
+	offset += sizeof(mqttUser);
+	EEPROM.put(offset, mqttPassword);
+	offset += sizeof(mqttPassword);
+	EEPROM.put(offset, mqttID);
+	offset += sizeof(mqttID);
+
 	EEPROM.put(0, 0);
 	EEPROM.commit();
+
+	client.setServer(mqttServer, 1883);
 }
 
 void saveInstruments() {
@@ -653,6 +850,10 @@ void setup() {
   if(!EEPROM.read(0)) {
   //if(false) {
 	  int offset = 8;
+
+	  EEPROM.get(offset, www_password);
+	  offset += sizeof(www_password);
+#ifdef THINGSSPEAK
 	  EEPROM.get(offset, serverName);
 	  offset += sizeof(serverName);
       EEPROM.get(offset, writeApiKey);
@@ -661,38 +862,64 @@ void setup() {
       offset += sizeof(talkbackApiKey);
 	  EEPROM.get(offset, talkbackID);
 	  offset += sizeof(talkbackID);
-	  EEPROM.get(offset, www_password);
+#endif
+	  EEPROM.get(offset, mqttServer);
+	  offset += sizeof(mqttServer);
+	  EEPROM.get(offset, mqttUser);
+	  offset += sizeof(mqttUser);
+	  EEPROM.get(offset, mqttPassword);
+	  offset += sizeof(mqttPassword);
+	  EEPROM.get(offset, mqttID);
+	  offset += sizeof(mqttID);
+
+	  client.setServer(mqttServer, 1883);
 
 	  for(int d=0; d< DEVICES_NUM; d++) {
 		  EEPROM.get(EEPROM_OFFSET + sizeof(Device) * d, devices[d]);
+		  bitClear(devices[d].flags, OUTPUT_BIT);
 	  }
   }
   else {
+	  strcpy(www_password, "eCAN") ;
+#ifdef THINGSSPEAK
 	  strcpy(serverName, "api.thingspeak.com") ;
 	  writeApiKey[0] = '/0';
 	  talkbackID = 0;
 	  talkbackApiKey[0] = '/0';
-	  strcpy(www_password, "eCan") ;
+#endif
+	  strcpy(mqttServer, "broker.hivemq.com") ;
+	  //mqttUser[0] = '/0';
+	  //mqttPassword[0] = '/0';
+	  strcpy(mqttUser, "eCAN") ;
+	  strcpy(mqttPassword, "eCAN") ;
+	  mqttID = 0;
+
 	  saveApi();
 	  saveInstruments();
-  }
 
-  strcpy(devices[0].name, "VALVE A");
-  strcpy(devices[1].name, "VALVE B");
-  strcpy(devices[2].name, "       ");
-  strcpy(devices[3].name, "LOW    ");
-  strcpy(devices[4].name, "HIGH   ");
-  strcpy(devices[5].name, "       ");
-  strcpy(devices[6].name, "LEVEL  ");
-  strcpy(devices[7].name, "       ");
+
+	  strcpy(devices[0].name, "VALVE A");
+	  strcpy(devices[1].name, "VALVE B");
+	  strcpy(devices[2].name, "VALVE C");
+	  strcpy(devices[3].name, "VALVE D");
+	  strcpy(devices[4].name, "       ");
+  }
+  strcpy(devices[DEV_ALARM_MAX].name, "LEVEL MAX");
+  strcpy(devices[DEV_ALARM_MIN].name, "LEVEL MIN");
+  strcpy(devices[DEV_LEV_CAL].name,   "LEVEL");
+
+
 
 #ifdef CONFIG_WIFIAP_PIN
   pinMode(CONFIG_WIFIAP_PIN, INPUT_PULLUP);
 #endif
 
 #ifdef INPUT1_PIN
+
   pinMode(CONFIG_WIFI_PIN, INPUT_PULLUP);
   pinMode(INPUT1_PIN, INPUT_PULLUP);
+  pinMode(INPUT2_PIN, INPUT_PULLUP);
+  pinMode(INPUT3_PIN, INPUT_PULLUP);
 #endif
 
 #ifdef RFTX_PIN
@@ -734,7 +961,9 @@ void setup() {
 
   //if(digitalRead(CONFIG_WIFIAP_PIN) == HIGH) {
 
-
+ if ( digitalRead(INPUT1_PIN) == LOW ) {
+  strcpy(www_password, "eCAN") ;
+ }
 
   //if(0) {
   if ( digitalRead(CONFIG_WIFI_PIN) == LOW ) {
@@ -742,6 +971,8 @@ void setup() {
 #ifdef LED0_PIN
 	  digitalWrite(LED0_PIN, HIGH);
 #endif
+
+
 
 	  Serial.println("Starting AP for reconfiguration ...");
 #ifndef ESP8266
@@ -799,7 +1030,13 @@ void setup() {
   }*/
   //ArduinoOTA.begin();
 
+  /* configure the MQTT server with IPaddress and port */
+  //client.setServer(mqtt_server, 1883);
+  /* this receivedCallback function will be invoked	when client received subscribed topic */
+  client.setCallback(receivedCallback);
 
+  //timeClient.setUpdateInterval(60000 * 10);
+  mqttLock.clear();
 
   server.on("/", [](){
     Serial.println("/");
@@ -834,17 +1071,26 @@ void setup() {
     message += level;
     message += " mm</h2>";
 
+    if(bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT))
+    	message += "<h2>ALARM: LEVEL MAX</h2>";
+    if(bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT))
+    	message += "<h2>ALARM: LEVEL MIN</h2>";
+    if(errorConn)
+    	message += "<h2>ALARM: INTERNET CONNECTION ERROR</h2>";
+    if(errorSD)
+    	message += "<h2>ALARM: SD CARD</h2>";
+
     for(int i = 0; i < DEVICES_NUM; i++) {
-    	if(i == 2 || i == 5 || i == 7)
+    	if(i == 4) // || i == 5 || i == 7)
     		continue;
 
     	if(i == 0) {
     		message += "<hr><h3>VALVES</h3>";
     	}
-    	if(i == 3) {
-			message += "<hr><h3>LIMITS</h3>";
+    	if(i == DEV_ALARM_MAX) {
+			message += "<hr><h3>LIMITS LEVEL</h3>";
 		}
-    	if(i == 6) {
+    	if(i == DEV_LEV_CAL) {
 			message += "<hr><h3>CALIBRATION</h3>";
 		}
 
@@ -852,25 +1098,27 @@ void setup() {
     	//message += "<a href=./dev?id=";
     	message += i;
     	message += ">";
-    	message += i;
-    	message += ": ";
+    	if(i < DEV_ALARM_MAX) {
+			message += char(i + 65);
+			message += ": ";
+    	}
     	message += devices[i].name;
     	//message += "</A> ";
-    	if(i < 2) {
-			if(bitRead(devices[i].flags, MANUAL_BIT))
-				message += " MANUAL";
-			else
-				message += " AUTO";
+    	if(i < DEV_ALARM_MAX) {
+			//if(bitRead(devices[i].flags, MANUAL_BIT))
+			//	message += " MANUAL";
+			//else
+			//	message += " AUTO";
 			if(bitRead(devices[i].flags, OUTPUT_BIT))
-				message += " ON";
+				message += " OPEN";
 			else
-				message += " OFF";
+				message += " CLOSE";
 		}
     	if(i == 3 || i == 4) {
-			if(bitRead(devices[i].flags, OUTPUT_BIT))
-						message += " ALARM ON";
-					else
-						message += " ALARM OFF";
+			//if(bitRead(devices[i].flags, OUTPUT_BIT))
+			//			message += " ALARM ON";
+			//		else
+			//			message += " ALARM OFF";
     	}
     	message += "</a>";
     }
@@ -878,7 +1126,7 @@ void setup() {
 
     message += "<hr><h3>SYSTEM</h3>";
     message += "<hr><a href=/logs>LOGS</a>";
-    message += "<hr><a href=./save>SAVE INSTRUMENTS!</a>";
+    //message += "<hr><a href=./save>SAVE INSTRUMENTS!</a>";
     message += htmlFooter;
     server.send(200, "text/html", message);
   });
@@ -927,15 +1175,15 @@ void setup() {
 	  File file = root.openNextFile();
 	  while(file){
 		  if(file.isDirectory()){
-			  Serial.print("  DIR : ");
+			  Serial.print("DIR: ");
 			  Serial.println(file.name());
 			  //if(levels){
 			  //  listDir(fs, file.name(), levels -1);
 		  }
 		  else {
-			  Serial.print("  FILE: ");
+			  Serial.print("FILE: ");
 			  Serial.print(file.name());
-			  Serial.print("  SIZE: ");
+			  Serial.print("SIZE: ");
 			  Serial.println(file.size());
 
 			  message += "<tr><td><a href=/log?name=";
@@ -1029,7 +1277,11 @@ void setup() {
         message += "<hr>";
 
         message += "<form action=/savesettings>";
-        message += "SERVER NAME<br><input name=servername value=";
+        message += "ADMIN PASSWORD<br><input name=www_password value=";
+      	message += www_password;
+      	message += "><br>";
+#ifdef THINGSSPEAK
+        message += "<br>SERVER NAME<br><input name=servername value=";
 		message += serverName;
 		message += "><br>";
 	    message += "<br>WRITE API KEY<br><input name=writeapikey value=";
@@ -1041,8 +1293,18 @@ void setup() {
 	    message += "<br>TALKBACK API KEY<br><input name=talkbackapikey value=";
 	    message += talkbackApiKey;
 	    message += "><br>";
-	    message += "<br>ADMIN PASSWORD<br><input name=www_password value=";
-	    message += www_password;
+#endif
+	    message += "<br>MQTT SERVER<br><input name=mqttserver value=";
+		message += mqttServer;
+		message += "><br>";
+		message += "<br>MQTT USER<br><input name=mqttuser value=";
+		message += mqttUser;
+		message += "><br>";
+		message += "<br>MQTT PASSWORD<br><input name=mqttpassword value=";
+		message += mqttPassword;
+		message += "><br>";
+	    message += "<br>MQTT ID<br><input name=mqttid value=";
+	    message += mqttID;
 	    message += "><br><br>";
 	    message += "<button type=submit name=cmd value=setapi>SET API!</button>";
 	    message += "</form>";
@@ -1082,13 +1344,19 @@ void setup() {
   	  	  }
 
           if(server.arg("cmd").equals("setapi")) {
+        	  //TODO: disable for demo
+        	  strcpy(www_password, server.arg("www_password").c_str());
+
+#ifdef THINGSSPEAKS
         	  strcpy(serverName, server.arg("servername").c_str());
         	  strcpy(writeApiKey, server.arg("writeapikey").c_str());
         	  talkbackID = server.arg("talkbackid").toInt();
         	  strcpy(talkbackApiKey, (char*)server.arg("talkbackapikey").c_str());
-
-        	  //TODO: disable for demo
-        	  strcpy(www_password, server.arg("www_password").c_str());
+#endif
+        	  strcpy(mqttServer, (char*)server.arg("mqttserver").c_str());
+        	  strcpy(mqttUser, (char*)server.arg("mqttuser").c_str());
+        	  strcpy(mqttPassword, (char*)server.arg("mqttpassword").c_str());
+        	  mqttID = server.arg("mqttid").toInt();
 
         	  message += "API SET";
 
@@ -1116,13 +1384,14 @@ void setup() {
     	byte par2=server.arg("par2").toInt();
     	byte par3=server.arg("par3").toInt();
     	byte par4=server.arg("par4").toInt();
-    	String name=server.arg("n");
+    	String name=server.arg("name");
 
     	if(id >=0 && id < DEVICES_NUM) {
     		devices[id].par1 = par1;
     		devices[id].par2 = par2;
     		devices[id].par3 = par3;
     		devices[id].par4 = par4;
+    		strncpy(devices[id].name, name.c_str(), 16);
     		//name.toCharArray(devices[id].name, 8);
     	}
     }
@@ -1264,6 +1533,11 @@ void setup() {
 int frameWait = 0;
 int frameNo = 0;
 
+void drawNextFrame(OLEDDisplay *display) {
+	frameNo++;
+	drawDisplay(display, frameNo);
+}
+
 String int2string(int i) {
 	if(i < 10)
 		return "0" + String(i);
@@ -1277,27 +1551,106 @@ void loop1(void *pvParameters) {
 #else
 	if(1) {
 #endif
+
+#ifndef ESP8266
+		 drawMessage(&display, "CONNECTING ...");
+		 drawMessage(&display, "CONN NTP ...");
+#endif
+		 timeClient.update();
+#ifndef ESP8266
+		 drawMessage(&display, "NTP DONE");
+#endif
+
 		 errorConn = true;
 		 //drawMessage(&display, String(millis()));
+
+
+
+
+
+		 if(!mqttLock.test_and_set() && mqttServer[0] != 0 ) {
+
+
+
+
+#ifndef ESP8266
+		    drawMessage(&display, "MQTT CONNECTING...");
+#endif
+
+
+
+
+			 if (!client.connected()) {
+				mqttconnect();
+			  }
+			 /* this function will listen for incomming subscribed topic-process-invoke receivedCallback */
+			 //client.loop();
+
+			 if (client.connected()) {
+				 snprintf (msg, 20, "%lf", level);
+				 //client.publish(LEVEL_VAL_TOPIC, msg);
+
+				 client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_VAL_TOPIC).c_str(), msg);
+				 Serial.println(String(ROOT_TOPIC + String(mqttID) + LEVEL_VAL_TOPIC).c_str());
+				 Serial.println(msg);
+
+				 snprintf (msg, 20, "%d", bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT));
+				 //client.publish(LEVEL_MAX_TOPIC, msg);
+				 client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MAX_TOPIC).c_str(), msg);
+
+				 snprintf (msg, 20, "%d", bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT));
+				 //client.publish(LEVEL_MIN_TOPIC, msg);
+				 client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MIN_TOPIC).c_str(), msg);
+
+				 snprintf (msg, 20, "%d", bitRead(devices[0].flags, OUTPUT_BIT));
+				 //client.publish(A_VAL_TOPIC, msg);
+				 client.publish(String(ROOT_TOPIC + String(mqttID) + A_VAL_TOPIC).c_str(), msg);
+
+				 snprintf (msg, 20, "%d", bitRead(devices[1].flags, OUTPUT_BIT));
+				 //client.publish(B_VAL_TOPIC, msg);
+				 client.publish(String(ROOT_TOPIC + String(mqttID) + B_VAL_TOPIC).c_str(), msg);
+
+				 snprintf (msg, 20, "%d", bitRead(devices[2].flags, OUTPUT_BIT));
+				 //client.publish(C_VAL_TOPIC, msg);
+				 client.publish(String(ROOT_TOPIC + String(mqttID) + C_VAL_TOPIC).c_str(), msg);
+
+				 snprintf (msg, 20, "%d", bitRead(devices[3].flags, OUTPUT_BIT));
+				 //client.publish(D_VAL_TOPIC, msg);
+				 client.publish(String(ROOT_TOPIC + String(mqttID) + D_VAL_TOPIC).c_str(), msg);
+
+				 errorConn = false;
+#ifndef ESP8266
+				 drawMessage(&display, "MQTT DONE");
+#endif
+		 	 }
+			 else {
+#ifndef ESP8266
+				 drawMessage(&display, "MQTT ERROR");
+#endif
+			 }
+			 mqttLock.clear();
+		 }
 
 		 if(isSD) {
 #ifndef ESP8266
   			  drawMessage(&display, "SD LOGGING...");
 #endif
 
-  			 int fileIndex = 10;
+  			 int fileIndex = 0;
   			 String path = "/" + String(fileIndex) + ".csv";
 			 //char* path = "/log1.csv";
 			 //String message = timeClient.getFormattedTime() + String(bitRead(devices[2].flags, OUTPUT_BIT) | bitRead(devices[3].flags, OUTPUT_BIT)) +  ';' + String(level) + ';' + String(bitRead(devices[0].flags, OUTPUT_BIT)) + ';' + String(bitRead(devices[1].flags, OUTPUT_BIT)) + '\n';;
   			 time_t t = CE.toLocal(timeClient.getEpochTime());
-  			 String message = String(year(t)) + "-" + int2string(month(t)) + "-" + int2string(day(t)) + " " + int2string(hour(t)) + ":" + int2string(minute(t)) + ":" + int2string(second(t)) + ";" + String(bitRead(devices[3].flags, OUTPUT_BIT) | bitRead(devices[4].flags, OUTPUT_BIT)) +  ';' + String(level) + ';' + String(bitRead(devices[0].flags, OUTPUT_BIT)) + ';' + String(bitRead(devices[1].flags, OUTPUT_BIT)) + '\n';;
-  			 Serial.println(message);
 
+  			 String message = String(year(t)) + "-" + int2string(month(t)) + "-" + int2string(day(t)) + " " + int2string(hour(t)) + ":" + int2string(minute(t)) + ":" + int2string(second(t)) + ";"
+  					 	 + String(bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT) | bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT)) + ";"
+						 + String(level) + ";" + String(bitRead(devices[0].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[1].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[2].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[3].flags, OUTPUT_BIT)) + '\n';
+  			 Serial.print(message);
 			 errorSD = false;
 			 if(!SD.exists(path)) {
 				 File file = SD.open(path, FILE_APPEND);
 				 if(file) {
-					 file.print("DATETIME;ALARM;LEVEL[mm];VALVE A;VALVE B\n");
+					 file.print("DATE TIME;ALARMS;LEVEL[mm];A: " + String(devices[0].name) + ";B: " + String(devices[1].name) +";C: " + String(devices[2].name) + ";D: " + String(devices[3].name) + "\n");
 					 file.close();
 				 }
 				 else {
@@ -1336,14 +1689,7 @@ void loop1(void *pvParameters) {
 
 		 if(!isAP) {
 
-#ifndef ESP8266
-			  drawMessage(&display, "CONNECTING ...");
-			  drawMessage(&display, "CONN NTP ...");
-#endif
-			  timeClient.update();
-#ifndef ESP8266
-			  drawMessage(&display, "NTP DONE");
-#endif
+
 
 			  if(!checkin) {
 #ifndef ESP8266
@@ -1358,6 +1704,7 @@ void loop1(void *pvParameters) {
 #endif
 			  }
 
+#ifdef THINGSSPEAK
 			  if(serverName[0] != 0 && !isAP) {
 
 				  //HTTPClient http;  //Declare an object of class HTTPClient
@@ -1463,6 +1810,8 @@ void loop1(void *pvParameters) {
 
 				  http.end();   //Close connection
 			  }
+#endif
+
 		 }
 
 		 delay(60000);
@@ -1517,13 +1866,13 @@ void loop() {
 
 
 
-   if(devices[6].par4 - devices[6].par3) {
-	   k = (devices[6].par2 - devices[6].par1) / (devices[6].par4 - devices[6].par3);
-	   d = -devices[6].par2;
+   if(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) {
+	   k = (float)(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) / (float)(devices[DEV_LEV_CAL].par2 - devices[DEV_LEV_CAL].par1);
+	   d = (float)devices[DEV_LEV_CAL].par3;
    }
    else {
-	   k = 1;
-	   d = 0;
+	   k = 1.0;
+	   d = 0.0;
    }
    level = analogRead(A0, SAMPLES) * k + d; //1/4095 * analogRead(A0) ;
 
@@ -1536,16 +1885,16 @@ void loop() {
 		//ui.nextFrame();
 	//}
 
-	bool alarm = bitRead(devices[3].flags, OUTPUT_BIT) | bitRead(devices[4].flags, OUTPUT_BIT);
-	bool unack = bitRead(devices[3].flags, UNACK_BIT) | bitRead(devices[4].flags, UNACK_BIT);
+	bool alarm = bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT) | bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT);
+	bool unack = bitRead(devices[DEV_ALARM_MAX].flags, UNACK_BIT) | bitRead(devices[DEV_ALARM_MIN].flags, UNACK_BIT);
 
 	//String s = String(touchRead(T4)) + " " + String(touchRead(T5)) + " " +String(touchRead(T6)) + " " +String(touchRead(T7)) + " " + String(touchRead(T8));
 	//drawMessage(&display, s);
 
 
 	if(!digitalRead(CONFIG_WIFI_PIN)) {
-		bitClear(devices[3].flags, UNACK_BIT);
-		bitClear(devices[4].flags, UNACK_BIT);
+		bitClear(devices[DEV_ALARM_MAX].flags, UNACK_BIT);
+		bitClear(devices[DEV_ALARM_MIN].flags, UNACK_BIT);
 #ifndef ESP8266
 		display.normalDisplay();
 #endif
@@ -1568,6 +1917,7 @@ void loop() {
 
   ArduinoOTA.handle();
   server.handleClient();
+  client.loop();
 
 #ifdef LCD
   display.clearDisplay();
@@ -1778,7 +2128,7 @@ void loop() {
 		}*/
   		//Serial.print('\n');
   		for(int i = 0; i < DEVICES_NUM; i++) {
-			if(i == 0 || i == 1) {
+			if(i < DEV_ALARM_MAX) {
 				unsigned int onSec = devices[i].par1 * 3600 + devices[i].par2 * 60;
 				unsigned int offSec = devices[i].par3 * 60 + devices[i].par4;
 
@@ -1791,6 +2141,7 @@ void loop() {
 
 				if(onSec) {
 					if(onSec == sec) {
+						Serial.println(String(i) + ": onTime");
 						bitClear(devices[i].flags, MANUAL_BIT);
 						bitSet(devices[i].flags, OUTPUT_BIT);
 						//valveOpenSecCounters[i] = 0;
@@ -1799,12 +2150,13 @@ void loop() {
 
 				//TODO: run once
 			    byte levelOn = 0;
-				if(i == 0)
-					levelOn = devices[4].par1;
-				if(i == 1)
-					levelOn = devices[4].par2;
+				//if(i == 0)
+					levelOn = devices[DEV_ALARM_MAX].par1;
+				//if(i == 1)
+				//	levelOn = devices[4].par2;
 				if(!bitRead(devices[i].flags, RUNONCE_BIT)) {
 					if((level > levelOn) && levelOn) {
+						Serial.println(String(i) + ": onLevel");
 						bitSet(devices[i].flags, RUNONCE_BIT);
 						bitClear(devices[i].flags, MANUAL_BIT);
 						bitSet(devices[i].flags, OUTPUT_BIT);
@@ -1814,6 +2166,7 @@ void loop() {
 
 				if(offSec)
 					if(valveOpenSecCounters[i] > offSec) {
+						Serial.println(String(i) + ": offTime");
 						bitClear(devices[i].flags, MANUAL_BIT);
 						bitClear(devices[i].flags, OUTPUT_BIT);
 						valveOpenSecCounters[i] = 0;
@@ -1821,27 +2174,19 @@ void loop() {
 				}
 
 				byte levelOff = 0;
-				if(i == 0)
-					levelOff = devices[3].par1;
-				if(i == 1)
-					levelOff = devices[3].par2;
+				//if(i == 0)
+					levelOff = devices[DEV_ALARM_MIN].par1;
+				//if(i == 1)
+				//	levelOff = devices[3].par2;
 				if((level <= levelOff) && levelOff) {
+					Serial.println(String(i) + ": offLevel");
+
 					bitClear(devices[i].flags, RUNONCE_BIT);
 					bitClear(devices[i].flags, MANUAL_BIT);
 					bitClear(devices[i].flags, OUTPUT_BIT);
 					valveOpenSecCounters[i] = 0;
 				}
-
-				if(i==3) {
-					if(level <= devices[i].par3 && devices[i].par3) {
-						if(!bitRead(devices[i].flags, OUTPUT_BIT))
-							bitSet(devices[i].flags, UNACK_BIT);
-						bitSet(devices[i].flags, OUTPUT_BIT);
-						}
-					if(level >= ((devices[i].par3 - devices[i].par4)) || !devices[i].par3)
-						bitClear(devices[i].flags, OUTPUT_BIT);
-				}
-				if(i == 4) {
+				if(i == DEV_ALARM_MAX) {
 					if(level >= devices[i].par3 && devices[i].par3) {
 						if(!bitRead(devices[i].flags, OUTPUT_BIT))
 							bitSet(devices[i].flags, UNACK_BIT);
@@ -1850,6 +2195,17 @@ void loop() {
 					if((level <= (devices[i].par3 - devices[i].par4)) || !devices[i].par3)
 						bitClear(devices[i].flags, OUTPUT_BIT);
 				}
+
+				if(i==DEV_ALARM_MIN) {
+					if(level <= devices[i].par3 && devices[i].par3) {
+						if(!bitRead(devices[i].flags, OUTPUT_BIT))
+							bitSet(devices[i].flags, UNACK_BIT);
+						bitSet(devices[i].flags, OUTPUT_BIT);
+						}
+					if(level >= ((devices[i].par3 - devices[i].par4)) || !devices[i].par3)
+						bitClear(devices[i].flags, OUTPUT_BIT);
+				}
+
 
   		/*
 			if(i==1) {
@@ -1999,19 +2355,22 @@ void loop() {
   		}
   		secCounter++;
 
-  		if(bitRead(devices[0].flags, OUTPUT_BIT)) {
-  			valveOpenSecCounters[0]++;
+  		for(int i = 0; i < DEV_ALARM_MAX; i++) {
+			if(bitRead(devices[i].flags, OUTPUT_BIT)) {
+				valveOpenSecCounters[i]++;
+			}
   		}
-  		if(bitRead(devices[1].flags, OUTPUT_BIT)) {
-  			valveOpenSecCounters[1]++;
-  		}
+  		//if(bitRead(devices[1].flags, OUTPUT_BIT)) {
+  		//	valveOpenSecCounters[1]++;
+  		//}
 
 #ifdef LED0_PIN
-		digitalWrite(LED0_PIN, not(bitRead(devices[3].flags, OUTPUT_BIT) | bitRead(devices[4].flags, OUTPUT_BIT)));
+		digitalWrite(LED0_PIN, not(bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT) | bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT)));
 #endif
 
 		if(digitalRead(CONFIG_WIFI_PIN) == LOW) {
 			if(bitRead(devices[0].flags, OUTPUT_BIT)) {
+				//Serial.println("0: onButton");
 				bitClear(devices[0].flags, MANUAL_BIT);
 				bitClear(devices[0].flags, OUTPUT_BIT);
 			}
@@ -2030,18 +2389,97 @@ void loop() {
 				bitSet(devices[1].flags, OUTPUT_BIT);
 			}
 		}
-
+		if(digitalRead(INPUT2_PIN) == LOW) {
+			if(bitRead(devices[2].flags, OUTPUT_BIT)) {
+				bitClear(devices[2].flags, MANUAL_BIT);
+				bitClear(devices[2].flags, OUTPUT_BIT);
+			}
+			else {
+				bitSet(devices[2].flags, MANUAL_BIT);
+				bitSet(devices[2].flags, OUTPUT_BIT);
+			}
+		}
+		if(digitalRead(INPUT3_PIN) == LOW) {
+			if(bitRead(devices[3].flags, OUTPUT_BIT)) {
+				bitClear(devices[3].flags, MANUAL_BIT);
+				bitClear(devices[3].flags, OUTPUT_BIT);
+			}
+			else {
+				bitSet(devices[3].flags, MANUAL_BIT);
+				bitSet(devices[3].flags, OUTPUT_BIT);
+			}
+		}
 
 #ifdef OUTPUT0_PIN
+
 		digitalWrite(OUTPUT0_PIN, not(bitRead(devices[0].flags, OUTPUT_BIT))); //| (digitalRead(CONFIG_WIFI_PIN) == LOW)));
 		digitalWrite(OUTPUT1_PIN, not(bitRead(devices[1].flags, OUTPUT_BIT))); //| (digitalRead(INPUT1_PIN) == LOW)));
-
-		digitalWrite(OUTPUT3_PIN, not(bitRead(devices[3].flags, OUTPUT_BIT) | bitRead(devices[4].flags, OUTPUT_BIT)));
+		digitalWrite(OUTPUT2_PIN, not(bitRead(devices[2].flags, OUTPUT_BIT))); //| (digitalRead(INPUT1_PIN) == LOW)));
+		digitalWrite(OUTPUT3_PIN, not(bitRead(devices[3].flags, OUTPUT_BIT)));
+		//digitalWrite(OUTPUT3_PIN, not(bitRead(devices[3].flags, OUTPUT_BIT) | bitRead(devices[4].flags, OUTPUT_BIT)));
 #endif
+		if(!mqttLock.test_and_set() && mqttServer[0] != 0) {
+
+
+			//if (!client.connected()) {
+			//	mqttconnect();
+			//}
+			yield();
+			if (client.connected()) {
+				for(int i = 0; i < DEVICES_NUM; i++) {
+					if(bitRead(devices[i].flags, OUTPUT_BIT) != bitRead(devices[i].flags, PREVOUTPUT_BIT)) {
+						if(bitRead(devices[i].flags, OUTPUT_BIT))
+							bitSet(devices[i].flags, PREVOUTPUT_BIT);
+						else
+							bitClear(devices[i].flags, PREVOUTPUT_BIT);
+						snprintf (msg, 20, "%d", bitRead(devices[i].flags, OUTPUT_BIT));
+						if(i == 0) {
+							//client.publish(A_VAL_TOPIC, msg);
+							client.publish(String(ROOT_TOPIC + String(mqttID) + A_VAL_TOPIC).c_str(), msg);
+						}
+						if(i == 1) {
+							//client.publish(B_VAL_TOPIC, msg);
+							client.publish(String(ROOT_TOPIC + String(mqttID) + B_VAL_TOPIC).c_str(), msg);
+						}
+						if(i == 2) {
+							//client.publish(C_VAL_TOPIC, msg);
+							client.publish(String(ROOT_TOPIC + String(mqttID) + C_VAL_TOPIC).c_str(), msg);
+						}
+						if(i == 3) {
+							//client.publish(D_VAL_TOPIC, msg);
+							client.publish(String(ROOT_TOPIC + String(mqttID) + D_VAL_TOPIC).c_str(), msg);
+						}
+						if(i == DEV_ALARM_MAX) {
+							//client.publish(LEVEL_MAX_TOPIC, msg);
+							client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MAX_TOPIC).c_str(), msg);
+						}
+						if(i == DEV_ALARM_MIN) {
+							//client.publish(LEVEL_MIN_TOPIC, msg);
+							client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MIN_TOPIC).c_str(), msg);
+						}
+					}
+				}
+			}
+			mqttLock.clear();
+		}
   }
 
 
+	 snprintf (msg, 20, "%d", bitRead(devices[0].flags, OUTPUT_BIT));
+	 //client.publish(A_VAL_TOPIC, msg);
+	 client.publish(String(String(mqttID) + A_VAL_TOPIC).c_str(), msg);
 
+	 snprintf (msg, 20, "%d", bitRead(devices[1].flags, OUTPUT_BIT));
+	 //client.publish(B_VAL_TOPIC, msg);
+	 client.publish(String(String(mqttID) + B_VAL_TOPIC).c_str(), msg);
+
+	 snprintf (msg, 20, "%d", bitRead(devices[2].flags, OUTPUT_BIT));
+	 //client.publish(C_VAL_TOPIC, msg);
+	 client.publish(String(String(mqttID) + C_VAL_TOPIC).c_str(), msg);
+
+	 snprintf (msg, 20, "%d", bitRead(devices[3].flags, OUTPUT_BIT));
+	 //client.publish(D_VAL_TOPIC, msg);
+	 client.publish(String(String(mqttID) + D_VAL_TOPIC).c_str(), msg);
 
 
 
