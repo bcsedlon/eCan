@@ -2,7 +2,7 @@
 //This is a automatic generated file
 //Please do not modify this file
 //If you touch this file your change will be overwritten during the next build
-//This file has been generated on 2018-08-23 18:10:57
+//This file has been generated on 2018-08-29 10:52:26
 
 #include "Arduino.h"
 #include "Arduino.h"
@@ -40,6 +40,7 @@ extern WebServer server;
 extern WiFiClient espClient;
 extern PubSubClient client;
 extern std::atomic_flag mqttLock;
+extern String mqttRootTopic;
 extern WiFiUDP ntpUDP;
 extern NTPClient timeClient;
 extern int reconnectTimeout;
@@ -61,16 +62,12 @@ extern Timezone CE;
 #define LEVEL_VAL_TOPIC	"/level/val"
 #define LEVEL_MAX_TOPIC	"/level/max"
 #define LEVEL_MIN_TOPIC	"/level/min"
-#define A_VAL_TOPIC 	"/A/val"
-#define A_CMP_TOPIC     "/A/cmd"
-#define B_VAL_TOPIC 	"/B/val"
-#define B_CMP_TOPIC     "/B/cmd"
-#define C_VAL_TOPIC 	"/C/val"
-#define C_CMP_TOPIC     "/C/cmd"
-#define D_VAL_TOPIC 	"/D/val"
-#define D_CMP_TOPIC     "/D/cmd"
+#define A_TOPIC 	"/A"
+#define B_TOPIC 	"/B"
+#define C_TOPIC 	"/C"
+#define D_TOPIC 	"/D"
 extern char msg[];
-extern float level;
+extern float levelRaw;
 extern unsigned long valveOpenSecCounters[];
 extern IPAddress deviceIP;
 extern bool isAP;

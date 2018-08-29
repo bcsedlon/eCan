@@ -90,6 +90,7 @@ DHT dht(DHT_PIN, 11);
 WiFiClient espClient;
 PubSubClient client(espClient);
 std::atomic_flag mqttLock = ATOMIC_FLAG_INIT;
+String mqttRootTopic;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -120,14 +121,20 @@ Timezone CE(CEST, CET);
 #define LEVEL_VAL_TOPIC	"/level/val"
 #define LEVEL_MAX_TOPIC	"/level/max"
 #define LEVEL_MIN_TOPIC	"/level/min"
-#define A_VAL_TOPIC 	"/A/val"
-#define A_CMP_TOPIC     "/A/cmd" /* 1=on, 0=off */
-#define B_VAL_TOPIC 	"/B/val"
-#define B_CMP_TOPIC     "/B/cmd" /* 1=on, 0=off */
-#define C_VAL_TOPIC 	"/C/val"
-#define C_CMP_TOPIC     "/C/cmd" /* 1=on, 0=off */
-#define D_VAL_TOPIC 	"/D/val"
-#define D_CMP_TOPIC     "/D/cmd" /* 1=on, 0=off */
+#define A_TOPIC 	"/A"
+#define B_TOPIC 	"/B"
+#define C_TOPIC 	"/C"
+#define D_TOPIC 	"/D"
+
+//#define A_VAL_TOPIC 	"/A/val"
+//#define A_CMP_TOPIC     "/A/cmd" /* 1=on, 0=off */
+//#define B_VAL_TOPIC 	"/B/val"
+//#define B_CMP_TOPIC     "/B/cmd" /* 1=on, 0=off */
+//#define C_VAL_TOPIC 	"/C/val"
+//#define C_CMP_TOPIC     "/C/cmd" /* 1=on, 0=off */
+//#define D_VAL_TOPIC 	"/D/val"
+//#define D_CMP_TOPIC     "/D/cmd" /* 1=on, 0=off */
+
 //long lastMsg = 0;
 char msg[20];
 
@@ -184,7 +191,7 @@ struct Device {
 	char name[16];
 } devices[DEVICES_NUM];
 
-float level, k, d;
+float levelRaw, level, k, d;
 unsigned long valveOpenSecCounters[DEVICES_NUM];
 IPAddress deviceIP;
 
@@ -224,13 +231,13 @@ void receivedCallback(char* topic, byte* payload, unsigned int length) {
 
   //Serial.println(strstr(topic, A_CMP_TOPIC)!= NULL);
   int i = -1;
-  if(strstr(topic, A_CMP_TOPIC))
+  if(strstr(topic, A_TOPIC))
 	  i = 0;
-  if(strstr(topic, B_CMP_TOPIC))
+  if(strstr(topic, B_TOPIC))
   	  i = 1;
-  if(strstr(topic, C_CMP_TOPIC))
+  if(strstr(topic, C_TOPIC))
   	  i = 2;
-  if(strstr(topic, D_CMP_TOPIC))
+  if(strstr(topic, D_TOPIC))
   	  i = 3;
   if(i > -1) {
 	  if((char)payload[0]=='0') {
@@ -269,7 +276,7 @@ void mqttconnect() {
 		if (client.connect(clientId.c_str())) {
 		  Serial.println("connected");
 		  /* subscribe topic with default QoS 0*/
-		  client.subscribe(String(ROOT_TOPIC + String(mqttID) + "/#").c_str());
+		  client.subscribe(String(ROOT_TOPIC + String(mqttID) + "/cmd/#").c_str());
 		} else {
 		  Serial.print("failed, status code =");
 		  Serial.println(client.state());
@@ -465,7 +472,8 @@ void drawFrameM1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int
   //display->setFont(ArialMT_Plain_24);
   display->setFont(ArialMT_Plain_16);
 
-  level = analogRead(A0, SAMPLES) * k + d;
+  levelRaw = analogRead(A0, SAMPLES);
+  level = levelRaw * k + d;
   display->drawString(0 + x, 32 + y, String(level));
 }
 
@@ -716,6 +724,11 @@ String getDeviceForm(int i, struct Device devices[]) {
 	}
 
 	if(i==DEV_LEV_CAL) {
+		s += "<hr>RAW VALUE [-]<br>";
+		s += levelRaw;
+		s += "<hr>VALUE [mm]<br>";
+		s += level;
+
 		s += "<hr>X0 [-]<br><input name=par1 value=";
 		s += d.par1;
 		s += "><hr>X100 [-]<br><input name=par2 value=";
@@ -770,6 +783,7 @@ void saveApi() {
 	EEPROM.put(0, 0);
 	EEPROM.commit();
 
+	mqttRootTopic = String(ROOT_TOPIC + String(mqttID) + "/val");
 	client.setServer(mqttServer, 1883);
 }
 
@@ -797,6 +811,8 @@ void setup() {
   Serial.begin(115200);
   Serial.print("\n\n");
   Serial.println("eCAN");
+
+
 
 #ifndef ESP8266
   analogReadResolution(9);
@@ -908,7 +924,7 @@ void setup() {
   strcpy(devices[DEV_ALARM_MIN].name, "LEVEL MIN");
   strcpy(devices[DEV_LEV_CAL].name,   "LEVEL");
 
-
+  mqttRootTopic = String(ROOT_TOPIC + String(mqttID) + "/val");
 
 #ifdef CONFIG_WIFIAP_PIN
   pinMode(CONFIG_WIFIAP_PIN, INPUT_PULLUP);
@@ -1574,12 +1590,12 @@ void loop1(void *pvParameters) {
 
 
 #ifndef ESP8266
-		    drawMessage(&display, "MQTT CONNECTING...");
+		    drawMessage(&display, "MQTT CONNECTING ...");
 #endif
 
 
 
-
+		    client.loop();
 			 if (!client.connected()) {
 				mqttconnect();
 			  }
@@ -1587,36 +1603,65 @@ void loop1(void *pvParameters) {
 			 //client.loop();
 
 			 if (client.connected()) {
-				 snprintf (msg, 20, "%lf", level);
+
+				 //client.publish("ecan/1/level/val", "1");
+
+				 snprintf (msg, 20, "%d", (int)level);
+				 msg[19] = 0;
 				 //client.publish(LEVEL_VAL_TOPIC, msg);
-
-				 client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_VAL_TOPIC).c_str(), msg);
-				 Serial.println(String(ROOT_TOPIC + String(mqttID) + LEVEL_VAL_TOPIC).c_str());
-				 Serial.println(msg);
-
+			     //delay(1500);
+			     //snprintf (msg, 20, "%d", 1);
+				 client.publish(String(mqttRootTopic + LEVEL_VAL_TOPIC).c_str(), msg);
+				 //Serial.println(String(mqttRootTopic + LEVEL_VAL_TOPIC).c_str());
+				 //Serial.println(client.connected());
+				 //client.loop();
+				 //Serial.println(msg);
+				 //delay(1500);
 				 snprintf (msg, 20, "%d", bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT));
 				 //client.publish(LEVEL_MAX_TOPIC, msg);
-				 client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MAX_TOPIC).c_str(), msg);
-
+				 client.publish(String(mqttRootTopic + LEVEL_MAX_TOPIC).c_str(), msg);
+				 //Serial.println(String(mqttRootTopic + LEVEL_MAX_TOPIC).c_str());
+				 //Serial.println(client.connected());
+				 //client.loop();
+				 //delay(1500);
 				 snprintf (msg, 20, "%d", bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT));
 				 //client.publish(LEVEL_MIN_TOPIC, msg);
-				 client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MIN_TOPIC).c_str(), msg);
-
+				 client.publish(String(mqttRootTopic + LEVEL_MIN_TOPIC).c_str(), msg);
+				 //Serial.println(String(mqttRootTopic + LEVEL_MIN_TOPIC).c_str());
+				 //Serial.println(client.connected());
+				 //client.loop();
+				 //delay(1500);
 				 snprintf (msg, 20, "%d", bitRead(devices[0].flags, OUTPUT_BIT));
 				 //client.publish(A_VAL_TOPIC, msg);
-				 client.publish(String(ROOT_TOPIC + String(mqttID) + A_VAL_TOPIC).c_str(), msg);
-
+				 client.publish(String(mqttRootTopic + A_TOPIC).c_str(), msg);
+				 //client.publish(String(mqttRootTopic + A_VAL_TOPIC).c_str(), msg);
+				 //Serial.println(String(mqttRootTopic + A_VAL_TOPIC).c_str());
+				 //Serial.println(client.connected());
+				 //client.loop();
+				 //delay(1500);
 				 snprintf (msg, 20, "%d", bitRead(devices[1].flags, OUTPUT_BIT));
 				 //client.publish(B_VAL_TOPIC, msg);
-				 client.publish(String(ROOT_TOPIC + String(mqttID) + B_VAL_TOPIC).c_str(), msg);
-
+				 client.publish(String(mqttRootTopic + B_TOPIC).c_str(), msg);
+				 //client.publish(String(mqttRootTopic + B_VAL_TOPIC).c_str(), msg);
+				 //Serial.println(String(mqttRootTopic + B_VAL_TOPIC).c_str());
+				 //Serial.println(client.connected());
+				 //client.loop();
+				 //delay(1500);
 				 snprintf (msg, 20, "%d", bitRead(devices[2].flags, OUTPUT_BIT));
 				 //client.publish(C_VAL_TOPIC, msg);
-				 client.publish(String(ROOT_TOPIC + String(mqttID) + C_VAL_TOPIC).c_str(), msg);
-
+				 client.publish(String(mqttRootTopic + C_TOPIC).c_str(), msg);
+				 //client.publish(String(mqttRootTopic + C_VAL_TOPIC).c_str(), msg);
+				 //Serial.println(String(mqttRootTopic + C_VAL_TOPIC).c_str());
+				 //Serial.println(client.connected());
+				 //client.loop();
+				 //delay(1500);
 				 snprintf (msg, 20, "%d", bitRead(devices[3].flags, OUTPUT_BIT));
 				 //client.publish(D_VAL_TOPIC, msg);
-				 client.publish(String(ROOT_TOPIC + String(mqttID) + D_VAL_TOPIC).c_str(), msg);
+				 client.publish(String(mqttRootTopic + D_TOPIC).c_str(), msg);
+				 //client.publish(String(mqttRootTopic + D_VAL_TOPIC).c_str(), msg);
+				 //Serial.println(String(mqttRootTopic + D_VAL_TOPIC).c_str());
+				 //Serial.println(client.connected());
+				 //client.loop();
 
 				 errorConn = false;
 #ifndef ESP8266
@@ -1814,7 +1859,7 @@ void loop1(void *pvParameters) {
 
 		 }
 
-		 delay(60000);
+		 delay(30000);
 
 		 if(isAP && reconnectTimeout > 10) {
 			 reconnectTimeout = 0;
@@ -1864,18 +1909,6 @@ void loop() {
 	loop1(0);
 #endif
 
-
-
-   if(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) {
-	   k = (float)(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) / (float)(devices[DEV_LEV_CAL].par2 - devices[DEV_LEV_CAL].par1);
-	   d = (float)devices[DEV_LEV_CAL].par3;
-   }
-   else {
-	   k = 1.0;
-	   d = 0.0;
-   }
-   level = analogRead(A0, SAMPLES) * k + d; //1/4095 * analogRead(A0) ;
-
 	//int remainingTimeBudget = ui.update();
 	//if (remainingTimeBudget > 0) {
 		// You can do some work here
@@ -1917,7 +1950,7 @@ void loop() {
 
   ArduinoOTA.handle();
   server.handleClient();
-  client.loop();
+  //client.loop();
 
 #ifdef LCD
   display.clearDisplay();
@@ -1930,7 +1963,19 @@ void loop() {
 #endif
 
   if(minInterval.expired()) {
+
 	  minInterval.set(60000);
+	  /*
+	  if(client.connected()) {
+		 //client.publish("ecan/1/level/val", "1");
+		  snprintf (msg, 20, "%lf", level);
+		  client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_VAL_TOPIC).c_str(), msg);
+		  snprintf (msg, 20, "%d", bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT));
+		  client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MAX_TOPIC).c_str(), msg);
+		  snprintf (msg, 20, "%d", bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT));
+		  client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MIN_TOPIC).c_str(), msg);
+	  }
+	  */
 	  //minInterval.set(5000);
 
 #ifdef LED1_PIN
@@ -2054,11 +2099,32 @@ void loop() {
 
   }
 
-
-
   if (secInterval.expired()) {
 
   		secInterval.set(1000);
+
+  		 if(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) {
+  			   k = (float)(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) / (float)(devices[DEV_LEV_CAL].par2 - devices[DEV_LEV_CAL].par1);
+  			   d = (float)devices[DEV_LEV_CAL].par3;
+	   }
+	   else {
+		   k = 1.0;
+		   d = 0.0;
+	   }
+	   level = analogRead(A0, SAMPLES) * k + d; //1/4095 * analogRead(A0) ;
+
+  		if(!mqttLock.test_and_set()) {
+  			client.loop();
+  			Serial.print("MQTT: ");
+  			Serial.println(client.connected());
+  			if(client.connected()) {
+  				errorConn = false;
+  			}
+  			else {
+  				errorConn = true;
+  			}
+  			mqttLock.clear();
+  		}
 
 #ifndef ESP8266
   		if(unack && alarm) {
@@ -2092,7 +2158,6 @@ void loop() {
 
   		if((secCounter & 0xF) == 0xF) {
   			//drawMessage(&display, "SENSORS ...");
-
 			//TODO:
 			//drawMessage(&display, "SENSORS DONE");
   		}
@@ -2114,20 +2179,8 @@ void loop() {
 		    Serial.println();
 		 }
 #endif
-/*
 
-		if(bitRead(devices[0].flags, OUTPUT_BIT)) {
-			if(lightOnSecCounter < -1)
-					lightOnSecCounter++;
-			lightOffSecCounter = 0;
-		}
-		else {
-			if(lightOffSecCounter < -1)
-				lightOffSecCounter++;
-			lightOnSecCounter = 0;
-		}*/
-  		//Serial.print('\n');
-  		for(int i = 0; i < DEVICES_NUM; i++) {
+		for(int i = 0; i < DEVICES_NUM; i++) {
 			if(i < DEV_ALARM_MAX) {
 				unsigned int onSec = devices[i].par1 * 3600 + devices[i].par2 * 60;
 				unsigned int offSec = devices[i].par3 * 60 + devices[i].par4;
@@ -2205,131 +2258,8 @@ void loop() {
 					if(level >= ((devices[i].par3 - devices[i].par4)) || !devices[i].par3)
 						bitClear(devices[i].flags, OUTPUT_BIT);
 				}
-
-
-  		/*
-			if(i==1) {
-				if(!bitRead(devices[1].flags, MANUAL_BIT)) {
-					if(bitRead(devices[0].flags, OUTPUT_BIT)) {
-						//light
-						if(temperature >= devices[1].par1)
-							bitSet(devices[1].flags, OUTPUT_BIT);
-						if(temperature <= devices[1].par2)
-							bitClear(devices[1].flags, OUTPUT_BIT);
-					}
-					else {
-						//dark
-						if(temperature >= devices[1].par3)
-							bitSet(devices[1].flags, OUTPUT_BIT);
-						if(temperature <= devices[1].par4)
-							bitClear(devices[1].flags, OUTPUT_BIT);
-					}
-				}
-
-			}
-
-			if(i==2) {
-				//TODO: cycler
-				if(!bitRead(devices[2].flags, OUTPUT_BIT)) {
-					if(cyclerSecCounter > devices[2].par1 * 60 + devices[2].par2) {
-						bitSet(devices[2].flags, OUTPUT_BIT);
-						cyclerSecCounter = 0;
-					}
-				}
-				else {
-					if(cyclerSecCounter > devices[2].par3 * 60 + devices[2].par4) {
-						bitClear(devices[2].flags, OUTPUT_BIT);
-						cyclerSecCounter = 0;
-					}
-				}
-				cyclerSecCounter++;
-			}
-			if(i==3) {
-				if(!bitRead(devices[0].flags, OUTPUT_BIT) && lightOffSecCounter > devices[3].par2) {
-					//dark
-					if(analogIn >= devices[3].par1) {
-						if(!bitRead(devices[3].flags, OUTPUT_BIT))
-							bitSet(devices[3].flags, UNACK_BIT);
-						bitSet(devices[3].flags, OUTPUT_BIT);
-					}
-					if(analogIn <= devices[3].par1 - 5.0)
-						bitClear(devices[3].flags, OUTPUT_BIT);
-				}
-				else {
-					//light
-					bitClear(devices[3].flags, OUTPUT_BIT);
-				}
-			}
-			if(i==4) {
-				if(bitRead(devices[0].flags, OUTPUT_BIT && lightOnSecCounter > devices[4].par2)) {
-					//light
-					if(analogIn <= devices[4].par1) {
-						if(!bitRead(devices[4].flags, OUTPUT_BIT))
-							bitSet(devices[4].flags, UNACK_BIT);
-						bitSet(devices[4].flags, OUTPUT_BIT);
-					}
-					if(analogIn >= devices[4].par1 + 5.0)
-						bitClear(devices[4].flags, OUTPUT_BIT);
-				}
-				else {
-					//dark
-					bitClear(devices[4].flags, OUTPUT_BIT);
-				}
-			}
-
-			if(i==5) {
-				if(bitRead(devices[0].flags, OUTPUT_BIT) || lightOnSecCounter > devices[5].par3) {
-					//light
-					if(temperature >= devices[5].par1) {
-						if(!bitRead(devices[5].flags, OUTPUT_BIT))
-							bitSet(devices[5].flags, UNACK_BIT);
-						bitSet(devices[5].flags, OUTPUT_BIT);
-					}
-					if(temperature <= devices[5].par1 - 0.5)
-						bitClear(devices[5].flags, OUTPUT_BIT);
-				}
-				else {
-					//dark
-					if(temperature >= devices[5].par2) {
-						if(!bitRead(devices[5].flags, OUTPUT_BIT))
-							bitSet(devices[5].flags, UNACK_BIT);
-						bitSet(devices[5].flags, OUTPUT_BIT);
-					}
-					if(temperature <= devices[5].par2 - 0.5)
-						bitClear(devices[5].flags, OUTPUT_BIT);
-				}
-			}
-			if(i==6) {
-				if(bitRead(devices[0].flags, OUTPUT_BIT) || lightOffSecCounter < devices[5].par3) {
-					//light
-					if(temperature <= devices[6].par1) {
-						if(!bitRead(devices[6].flags, OUTPUT_BIT))
-							bitSet(devices[6].flags, UNACK_BIT);
-						bitSet(devices[6].flags, OUTPUT_BIT);
-					}
-					if(temperature >= devices[6].par1 + 0.5)
-						bitClear(devices[6].flags, OUTPUT_BIT);
-				}
-				else {
-					//dark
-					if(temperature <= devices[6].par2) {
-						if(!bitRead(devices[6].flags, OUTPUT_BIT))
-							bitSet(devices[6].flags, UNACK_BIT);
-						bitSet(devices[6].flags, OUTPUT_BIT);
-					}
-					if(temperature >= devices[6].par2 + 0.5)
-						bitClear(devices[6].flags, OUTPUT_BIT);
-				}
-
-			}
-*/
-  			//Serial.print(devices[i].flags);
-  			//Serial.print('\t');
-  			//Serial.print(devices[i].name);
-  			//Serial.print('\n');
-
-
-  		}
+				//per second
+		}
 
   		if((secCounter & 0xF) == 0xF) {
 #ifdef RFTX_PIN
@@ -2435,27 +2365,27 @@ void loop() {
 						snprintf (msg, 20, "%d", bitRead(devices[i].flags, OUTPUT_BIT));
 						if(i == 0) {
 							//client.publish(A_VAL_TOPIC, msg);
-							client.publish(String(ROOT_TOPIC + String(mqttID) + A_VAL_TOPIC).c_str(), msg);
+							client.publish(String(mqttRootTopic + A_TOPIC).c_str(), msg);
 						}
 						if(i == 1) {
 							//client.publish(B_VAL_TOPIC, msg);
-							client.publish(String(ROOT_TOPIC + String(mqttID) + B_VAL_TOPIC).c_str(), msg);
+							client.publish(String(mqttRootTopic + B_TOPIC).c_str(), msg);
 						}
 						if(i == 2) {
 							//client.publish(C_VAL_TOPIC, msg);
-							client.publish(String(ROOT_TOPIC + String(mqttID) + C_VAL_TOPIC).c_str(), msg);
+							client.publish(String(mqttRootTopic + C_TOPIC).c_str(), msg);
 						}
 						if(i == 3) {
 							//client.publish(D_VAL_TOPIC, msg);
-							client.publish(String(ROOT_TOPIC + String(mqttID) + D_VAL_TOPIC).c_str(), msg);
+							client.publish(String(mqttRootTopic + D_TOPIC).c_str(), msg);
 						}
 						if(i == DEV_ALARM_MAX) {
 							//client.publish(LEVEL_MAX_TOPIC, msg);
-							client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MAX_TOPIC).c_str(), msg);
+							client.publish(String(mqttRootTopic + LEVEL_MAX_TOPIC).c_str(), msg);
 						}
 						if(i == DEV_ALARM_MIN) {
 							//client.publish(LEVEL_MIN_TOPIC, msg);
-							client.publish(String(ROOT_TOPIC + String(mqttID) + LEVEL_MIN_TOPIC).c_str(), msg);
+							client.publish(String(mqttRootTopic + LEVEL_MIN_TOPIC).c_str(), msg);
 						}
 					}
 				}
@@ -2464,7 +2394,7 @@ void loop() {
 		}
   }
 
-
+  	 /*
 	 snprintf (msg, 20, "%d", bitRead(devices[0].flags, OUTPUT_BIT));
 	 //client.publish(A_VAL_TOPIC, msg);
 	 client.publish(String(String(mqttID) + A_VAL_TOPIC).c_str(), msg);
@@ -2480,7 +2410,7 @@ void loop() {
 	 snprintf (msg, 20, "%d", bitRead(devices[3].flags, OUTPUT_BIT));
 	 //client.publish(D_VAL_TOPIC, msg);
 	 client.publish(String(String(mqttID) + D_VAL_TOPIC).c_str(), msg);
-
+ 	 */
 
 
 
