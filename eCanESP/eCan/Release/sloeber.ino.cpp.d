@@ -225,14 +225,14 @@ sloeber.ino.cpp.o: ..\sloeber.ino.cpp \
  ..\libraries/OLED/SSD1306.h ..\libraries/OLED/SSD1306Wire.h \
  ..\libraries/OLED/OLEDDisplay.h ..\libraries/OLED/OLEDDisplayFonts.h \
  ..\libraries/OLED/OLEDDisplayUi.h ..\images.h \
+ D:\App\sloeber\arduinoPlugin\libraries\PubSubClient\2.6.0\src/PubSubClient.h \
  D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\libraries\ArduinoOTA\src/ArduinoOTA.h \
  D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\libraries\EEPROM/EEPROM.h \
  D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\libraries\FS\src/FS.h \
  ..\libraries/SD/src/SD.h \
  D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\libraries\SPI\src/SPI.h \
  D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\cores\esp32/esp32-hal-spi.h \
- ..\libraries/SD/src/sd_defines.h ..\libraries/RCSwitch.h \
- ..\libraries/interval.h ..\eCan.ino
+ ..\libraries/SD/src/sd_defines.h ..\libraries/interval.h ..\eCan.ino
 
 D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\cores\esp32/Arduino.h:
 
@@ -696,6 +696,8 @@ D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\cores\esp32/esp32-hal.h:
 
 ..\images.h:
 
+D:\App\sloeber\arduinoPlugin\libraries\PubSubClient\2.6.0\src/PubSubClient.h:
+
 D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\libraries\ArduinoOTA\src/ArduinoOTA.h:
 
 D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\libraries\EEPROM/EEPROM.h:
@@ -709,8 +711,6 @@ D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\libraries\SPI\src/SPI.h:
 D:\App\sloeber\arduinoPlugin\packages\arduino-esp32\cores\esp32/esp32-hal-spi.h:
 
 ..\libraries/SD/src/sd_defines.h:
-
-..\libraries/RCSwitch.h:
 
 ..\libraries/interval.h:
 

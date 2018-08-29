@@ -2,7 +2,7 @@
 //This is a automatic generated file
 //Please do not modify this file
 //If you touch this file your change will be overwritten during the next build
-//This file has been generated on 2018-08-29 10:52:26
+//This file has been generated on 2018-08-29 15:02:37
 
 #include "Arduino.h"
 #include "Arduino.h"
@@ -18,7 +18,8 @@
 #include "libraries/OLED/SSD1306.h"
 #include "libraries/OLED/OLEDDisplayUi.h"
 #include "images.h"
-extern WebServer server;
+extern WebServer httpServer;
+#define DRAWMESSAGE(display, message) (drawMessage(&display, message))
 #include <PubSubClient.h>
 #include <WiFiClient.h>
 #include <DNSServer.h>
@@ -38,7 +39,7 @@ extern WebServer server;
 #define OUTPUT2_PIN 33
 #define OUTPUT3_PIN 32
 extern WiFiClient espClient;
-extern PubSubClient client;
+extern PubSubClient mqttClient;
 extern std::atomic_flag mqttLock;
 extern String mqttRootTopic;
 extern WiFiUDP ntpUDP;
@@ -58,6 +59,7 @@ extern Timezone CE;
 #define RUNONCE_BIT 4
 #define PREVOUTPUT_BIT 5
 #define SAMPLES 16
+#define MQTT_CLIENTID   "eCAN"
 #define ROOT_TOPIC		"ecan/"
 #define LEVEL_VAL_TOPIC	"/level/val"
 #define LEVEL_MAX_TOPIC	"/level/max"
@@ -71,7 +73,7 @@ extern float levelRaw;
 extern unsigned long valveOpenSecCounters[];
 extern IPAddress deviceIP;
 extern bool isAP;
-extern bool checkin;
+extern bool checkIn;
 #define SD_CS_PIN 22
 extern bool isSD;
 #define ARDUINO_RUNNING_CORE 1
@@ -85,6 +87,7 @@ extern FrameCallback frames[];
 extern int frameCount;
 extern OverlayCallback overlays[];
 extern int overlaysCount;
+extern int frameNo;
 extern int lastFrameNo;
 extern String lastMessage;
 extern const char* host;
@@ -100,19 +103,7 @@ extern char mqttPassword[];
 extern unsigned int mqttID;
 extern HTTPClient http;
 extern int httpCode;
-extern unsigned int errorCounter;
-extern unsigned int r1Off;
-extern unsigned int r1On;
-extern unsigned int r2Off;
-extern unsigned int r2On;
-extern unsigned int r3Off;
-extern unsigned int r3On;
-extern unsigned int r4Off;
-extern unsigned int r4On;
-extern unsigned int rAllOff;
-extern unsigned int rAllOn;
-#include "libraries/RCSwitch.h"
-extern RCSwitch rcSwitch;
+extern unsigned int httpErrorCounter;
 #include "libraries/interval.h"
 
 bool loadFromSdCard(String path);
@@ -143,7 +134,7 @@ void startWiFiAP() ;
 void setup() ;
 void drawNextFrame(OLEDDisplay *display) ;
 String int2string(int i) ;
-void loop1(void *pvParameters) ;
+void loopComm(void *pvParameters) ;
 void loop() ;
 
 #include "eCan.ino"

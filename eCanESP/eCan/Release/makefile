@@ -17,6 +17,7 @@ RM := del
 -include libraries\Update\src\subdir.mk
 -include libraries\SPI\src\subdir.mk
 -include libraries\SD\src\subdir.mk
+-include libraries\PubSubClient\src\subdir.mk
 -include libraries\OLED\subdir.mk
 -include libraries\HTTPClient\src\subdir.mk
 -include libraries\FS\src\subdir.mk
