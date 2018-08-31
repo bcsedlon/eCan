@@ -123,7 +123,7 @@ Timezone CE(CEST, CET);
 
 //const char* mqtt_server = "broker.hivemq.com";//"iot.eclipse.org";
 //const char* mqtt_server = "iot.eclipse.org";
-#define MQTT_CLIENTID   "eCAN"
+#define MQTT_CLIENTID   "eCAN-"
 #define ROOT_TOPIC		"ecan/"
 #define LEVEL_VAL_TOPIC	"/level/val"
 #define LEVEL_MAX_TOPIC	"/level/max"
@@ -256,7 +256,7 @@ void mqttConnect() {
 	while (!mqttClient.connected()) {
 		yield();
 		//Serial.print("MQTT connecting ...");
-		if(mqttClient.connect(MQTT_CLIENTID, mqttUser, mqttPassword)) {;
+		if(mqttClient.connect(mqttClientId.c_str(), mqttUser, mqttPassword)) {;
 			mqttClient.subscribe(String(ROOT_TOPIC + String(mqttID) + "/cmd/#").c_str());
 			mqttState = mqttClient.state();
 			break;
@@ -481,7 +481,7 @@ char mqttServer[20];
 char mqttUser[20];
 char mqttPassword[20];
 unsigned int mqttID;
-
+String mqttClientId;
 HTTPClient http;  //Declare an object of class HTTPClient
 int httpCode;
 unsigned int httpErrorCounter;
@@ -829,6 +829,8 @@ void setup() {
 	digitalWrite(LED1_PIN, LOW);
 #endif
 
+	mqttClientId = String(MQTT_CLIENTID) + WiFi.macAddress();
+	Serial.println(mqttClientId);
 	//WiFiManager
 	//Local intialization. Once its business is done, there is no need to keep it around
 	WiFiManager wifiManager;
@@ -1505,7 +1507,8 @@ void loopComm(void *pvParameters) {
 
 		}
 
-		delay(26000);
+		//delay(26000);
+		delay(56000);
 
 		//if(isAP && reconnectTimeout > 10) {
 		if(reconnectTimeout > 10) {

@@ -2,7 +2,7 @@
 //This is a automatic generated file
 //Please do not modify this file
 //If you touch this file your change will be overwritten during the next build
-//This file has been generated on 2018-08-31 12:31:40
+//This file has been generated on 2018-08-31 18:41:45
 
 #include "Arduino.h"
 #include "Arduino.h"
@@ -60,7 +60,7 @@ extern Timezone CE;
 #define RUNONCE_BIT 4
 #define PREVOUTPUT_BIT 5
 #define SAMPLES 16
-#define MQTT_CLIENTID   "eCAN"
+#define MQTT_CLIENTID   "eCAN-"
 #define ROOT_TOPIC		"ecan/"
 #define LEVEL_VAL_TOPIC	"/level/val"
 #define LEVEL_MAX_TOPIC	"/level/max"
@@ -102,6 +102,7 @@ extern char mqttServer[];
 extern char mqttUser[];
 extern char mqttPassword[];
 extern unsigned int mqttID;
+extern String mqttClientId;
 extern HTTPClient http;
 extern int httpCode;
 extern unsigned int httpErrorCounter;
