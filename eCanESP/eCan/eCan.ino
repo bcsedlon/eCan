@@ -96,6 +96,7 @@ WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 std::atomic_flag mqttLock = ATOMIC_FLAG_INIT;
 String mqttRootTopic;
+int mqttState;
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
@@ -250,18 +251,20 @@ void receivedCallback(char* topic, byte* payload, unsigned int length) {
 	}
 }
 
-void mqttconnect() {
+void mqttConnect() {
 	int i = 0;
 	while (!mqttClient.connected()) {
 		yield();
 		//Serial.print("MQTT connecting ...");
 		if(mqttClient.connect(MQTT_CLIENTID, mqttUser, mqttPassword)) {;
 			mqttClient.subscribe(String(ROOT_TOPIC + String(mqttID) + "/cmd/#").c_str());
+			mqttState = mqttClient.state();
 			break;
 		}
 		else {
+			mqttState = mqttClient.state();
 			Serial.print("failed, status code =");
-			Serial.println(mqttClient.state());
+			Serial.println(mqttState);
 			delay(1000);
 		}
 		if(i++ >= 2)
@@ -435,7 +438,7 @@ void drawDisplay(OLEDDisplay *display, int frame) {
 			display->drawString(12 * i, 48, String(ch));
 		}
 	}
-	if(errorConn | errorSD) {
+	if(errorConn || errorSD) {
 		display->setTextAlignment(TEXT_ALIGN_RIGHT);
 		display->drawString(128, 48, "ALM");
 		display->setTextAlignment(TEXT_ALIGN_LEFT);
@@ -703,6 +706,7 @@ void setup() {
 		isSD = false;
 		Serial.println("No SD card attached");
 	}
+	errorSD = !isSD;
 
 #ifdef LCD
 	display.begin();
@@ -1325,7 +1329,7 @@ void loopComm(void *pvParameters) {
 			/* this function will listen for incoming subscribed topic-process-invoke receivedCallback */
 			mqttClient.loop();
 			if (!mqttClient.connected()) {
-				mqttconnect();
+				mqttConnect();
 			}
 			if (mqttClient.connected()) {
 				 snprintf (msg, 20, "%d", (int)level);
@@ -1353,20 +1357,20 @@ void loopComm(void *pvParameters) {
 		}
 
 		if(isSD) {
-			DRAWMESSAGE(display, "SD LOGGING...");
+			DRAWMESSAGE(display, "SD LOG ...");
 			int fileIndex = 0;
 			String path = "/" + String(fileIndex) + ".csv";
 			time_t t = CE.toLocal(timeClient.getEpochTime());
 
 			String message = String(year(t)) + "-" + int2string(month(t)) + "-" + int2string(day(t)) + " " + int2string(hour(t)) + ":" + int2string(minute(t)) + ":" + int2string(second(t)) + ";"
 					+ String(bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT) | bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT)) + ";"
-					+ String(level) + ";" + String(bitRead(devices[0].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[1].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[2].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[3].flags, OUTPUT_BIT)) + '\n';
+					+ String(level) + ";" + String(bitRead(devices[0].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[1].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[2].flags, OUTPUT_BIT)) + ";" + String(bitRead(devices[3].flags, OUTPUT_BIT)) + ";" + String(mqttState) + '\n';
 			Serial.print(message);
 			errorSD = false;
 			if(!SD.exists(path)) {
 				File file = SD.open(path, FILE_APPEND);
 				if(file) {
-					file.print("DATE TIME;ALARMS;LEVEL[mm];A: " + String(devices[0].name) + ";B: " + String(devices[1].name) +";C: " + String(devices[2].name) + ";D: " + String(devices[3].name) + "\n");
+					file.print("DATE TIME;ALARMS;LEVEL[mm];A: " + String(devices[0].name) + ";B: " + String(devices[1].name) +";C: " + String(devices[2].name) + ";D: " + String(devices[3].name) + ";MQTT\n");
 					file.close();
 				}
 				else {
@@ -1501,9 +1505,10 @@ void loopComm(void *pvParameters) {
 
 		}
 
-		delay(55000);
+		delay(26000);
 
-		if(isAP && reconnectTimeout > 10) {
+		//if(isAP && reconnectTimeout > 10) {
+		if(reconnectTimeout > 10) {
 			reconnectTimeout = 0;
 			//WiFi.softAPdisconnect(true);
 			WiFi.mode(WIFI_STA);
@@ -1604,8 +1609,8 @@ void loop() {
 
   		if(!mqttLock.test_and_set()) {
   			mqttClient.loop();
-  			//Serial.print("MQTT: ");
-  			//Serial.println(mqttClient.connected());
+  			Serial.print("MQTT: ");
+  			Serial.println(mqttClient.connected());
   			errorConn = !mqttClient.connected();
   			mqttLock.clear();
   		}
@@ -1818,7 +1823,7 @@ void loop() {
 
 		if(!mqttLock.test_and_set() && mqttServer[0] != 0) {
 			//if (!mqttClient.connected()) {
-			//	mqttconnect();
+			//	mqttConnect();
 			//}
 			yield();
 			if (mqttClient.connected()) {

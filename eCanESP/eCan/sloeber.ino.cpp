@@ -2,7 +2,7 @@
 //This is a automatic generated file
 //Please do not modify this file
 //If you touch this file your change will be overwritten during the next build
-//This file has been generated on 2018-08-29 15:02:37
+//This file has been generated on 2018-08-31 12:31:40
 
 #include "Arduino.h"
 #include "Arduino.h"
@@ -42,6 +42,7 @@ extern WiFiClient espClient;
 extern PubSubClient mqttClient;
 extern std::atomic_flag mqttLock;
 extern String mqttRootTopic;
+extern int mqttState;
 extern WiFiUDP ntpUDP;
 extern NTPClient timeClient;
 extern int reconnectTimeout;
@@ -109,7 +110,7 @@ extern unsigned int httpErrorCounter;
 bool loadFromSdCard(String path);
 float analogRead(int pin, int samples) ;
 void receivedCallback(char* topic, byte* payload, unsigned int length) ;
-void mqttconnect() ;
+void mqttConnect() ;
 void msOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) ;
 void drawFrame1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
 void drawFrameA1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) ;
