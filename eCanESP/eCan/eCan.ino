@@ -1169,10 +1169,10 @@ void setup() {
 		Serial.println(cmd);
 		byte id=httpServer.arg("id").toInt();
 		if(cmd.equals("set")) {
-			byte par1=httpServer.arg("par1").toInt();
-			byte par2=httpServer.arg("par2").toInt();
-			byte par3=httpServer.arg("par3").toInt();
-			byte par4=httpServer.arg("par4").toInt();
+			int par1=httpServer.arg("par1").toInt();
+			int par2=httpServer.arg("par2").toInt();
+			int par3=httpServer.arg("par3").toInt();
+			int par4=httpServer.arg("par4").toInt();
 			String name=httpServer.arg("name");
 			if(id >=0 && id < DEVICES_NUM) {
 				devices[id].par1 = par1;
@@ -1602,7 +1602,7 @@ void loop() {
 
   		if(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) {
   			k = (float)(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) / (float)(devices[DEV_LEV_CAL].par2 - devices[DEV_LEV_CAL].par1);
-  			d = (float)devices[DEV_LEV_CAL].par3;
+  			d = (float)devices[DEV_LEV_CAL].par4 - k * (float)devices[DEV_LEV_CAL].par4;
   		}
   		else {
   			k = 1.0;
