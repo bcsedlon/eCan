@@ -191,7 +191,7 @@ struct Device {
 	char name[16];
 } devices[DEVICES_NUM];
 
-float levelRaw, level, k, d;
+float levelRaw, level, levelK, levelD;
 unsigned long valveOpenSecCounters[DEVICES_NUM];
 IPAddress deviceIP;
 
@@ -407,7 +407,7 @@ void drawFrameM1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int
 	display->drawString(0 + x, 16 + y, "LEVEL");
 	display->setFont(ArialMT_Plain_16);
 	levelRaw = analogRead(A0, SAMPLES);
-	level = levelRaw * k + d;
+	level = levelRaw * levelK + levelD;
 	display->drawString(0 + x, 32 + y, String(level));
 }
 
@@ -600,10 +600,18 @@ String getDeviceForm(int i, struct Device devices[]) {
 	}
 
 	if(i==DEV_LEV_CAL) {
+  		calcKD(devices[DEV_LEV_CAL], &levelK, &levelD);
+
 		s += "<hr>RAW VALUE [-]<br>";
 		s += levelRaw;
 		s += "<hr>VALUE [mm]<br>";
 		s += level;
+
+		s += "<hr>k<br>";
+		s += levelK;
+		s += "<hr>d<br>";
+		s += levelD;
+
 		s += "<hr>X0 [-]<br><input name=par1 value=";
 		s += d.par1;
 		s += "><hr>X100 [-]<br><input name=par2 value=";
@@ -1541,6 +1549,16 @@ void loopComm(void *pvParameters) {
 	 }
 }
 
+void calcKD(Device dev, float *k, float *d) {
+	if(dev.par4 - dev.par3) {
+		*k = (float)(dev.par4 - dev.par3) / (float)(dev.par2 - dev.par1);
+		*d = (float)dev.par4 - *k * (float)dev.par2;
+	}
+	else {
+		*k = 1.0;
+		*d = 0.0;
+	}
+}
 /////////////////////////////////////
 // loop
 /////////////////////////////////////
@@ -1600,15 +1618,27 @@ void loop() {
 
   		secInterval.set(1000);
 
-  		if(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) {
-  			k = (float)(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) / (float)(devices[DEV_LEV_CAL].par2 - devices[DEV_LEV_CAL].par1);
-  			d = (float)devices[DEV_LEV_CAL].par4 - k * (float)devices[DEV_LEV_CAL].par4;
-  		}
-  		else {
-  			k = 1.0;
-  			d = 0.0;
-  		}
-  		level = analogRead(A0, SAMPLES) * k + d;
+  		//if(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) {
+  		//	levelK = (float)(devices[DEV_LEV_CAL].par4 - devices[DEV_LEV_CAL].par3) / (float)(devices[DEV_LEV_CAL].par2 - devices[DEV_LEV_CAL].par1);
+  		//	levelD = (float)devices[DEV_LEV_CAL].par4 - levelK * (float)devices[DEV_LEV_CAL].par2;
+  		//}
+  		//else {
+  		//	levelK = 1.0;
+  		//	levelD = 0.0;
+  		//}
+  		calcKD(devices[DEV_LEV_CAL], &levelK, &levelD);
+
+  		float x = analogRead(A0, SAMPLES);
+  		level = x * levelK + levelD;
+  		Serial.print("k: ");
+  		Serial.print(levelK);
+  		Serial.print(", d: ");
+  		Serial.print(levelD);
+  		Serial.print(", x: ");
+  		Serial.print(x);
+  		Serial.print(", y: ");
+  		Serial.println(level);
+
 
   		if(!mqttLock.test_and_set()) {
   			mqttClient.loop();
