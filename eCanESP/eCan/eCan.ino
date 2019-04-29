@@ -45,6 +45,9 @@ WebServer httpServer(80);
 #include "libraries/SD/src/SD.h"
 #include <SPI.h>
 
+#include "libraries/filter.h"
+ExponentialFilter<float> levelRawFiltered(20, 0);
+
 //WiFiManager wifiManager;
 /*
 ESP8266
@@ -406,8 +409,8 @@ void drawFrameM1(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int
 	display->setTextAlignment(TEXT_ALIGN_LEFT);
 	display->drawString(0 + x, 16 + y, "LEVEL");
 	display->setFont(ArialMT_Plain_16);
-	levelRaw = analogRead(A0, SAMPLES);
-	level = levelRaw * levelK + levelD;
+	//levelRaw = analogRead(A0, SAMPLES);
+	//level = levelRaw * levelK + levelD;
 	display->drawString(0 + x, 32 + y, String(level));
 }
 
@@ -562,7 +565,8 @@ String getDeviceForm(int i, struct Device devices[]) {
 	}
 	s += "</h2>";
 	if(i<DEV_ALARM_MAX) {
-		s += "<button type=submit name=cmd value=off>CLOSE</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=on>OPEN</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=auto>AUTO</button>";
+		//s += "<button type=submit name=cmd value=off>CLOSE</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=on>OPEN</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=auto>AUTO</button>";
+		s += "<button type=submit name=cmd value=off>CLOSE</button>&nbsp;&nbsp;&nbsp;<button type=submit name=cmd value=on>OPEN</button>";
 	}
 	s += "<hr><h3>SETTINGS:</h3>";
 	s += "<hr>NAME<br>";
@@ -576,8 +580,8 @@ String getDeviceForm(int i, struct Device devices[]) {
 		s += d.par2;
 		s += "><hr>CLOSE AFTER [MINUTE]<br><input name=par3 value=";
 		s += d.par3;
-		s += "><hr>CLOSE AFTER [SECOND]<br><input name=par4 value=";
-		s += d.par4;
+		//s += "><hr>CLOSE AFTER [SECOND]<br><input name=par4 value=";
+		//s += d.par4;
 		s += ">";
 	}
 	if(i==DEV_ALARM_MAX) {
@@ -696,7 +700,8 @@ void setup() {
 	Serial.println("eCAN");
 
 #ifndef ESP8266
-	analogReadResolution(9);
+	//analogReadResolution(9);
+	analogReadResolution(12);
 	display.init();
 	display.setFont(ArialMT_Plain_24);
 	display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -906,9 +911,16 @@ void setup() {
 		String message = htmlHeader;
 
 		time_t t = CE.toLocal(timeClient.getEpochTime());
-		byte h = (t / 3600) % 24;
+		tmElements_t tm;
+		breakTime(t, tm);
+
+		message += "<h2>TIME: ";
+		message +=String(int2string(tm.Hour) + ':' + int2string(tm.Minute) + ':' + int2string(tm.Second) + ' ' + int2string(tm.Year + 1970) + '-' + int2string(tm.Month) + '-' + int2string(tm.Day));
+		message += "</h2>";
+		/*byte h = (t / 3600) % 24;
 		byte m = (t / 60) % 60;
 		byte s = t % 60;
+
 		message += "<h2>TIME: ";
 		if(h < 10)
 			message += '0';
@@ -922,6 +934,7 @@ void setup() {
         	message += '0';
 		message += s;
 		message += "</h2>";
+		*/
 
 		message += "<h2>LEVEL: ";
 		message += level;
@@ -1057,30 +1070,38 @@ void setup() {
 		  return httpServer.requestAuthentication();
 
 		time_t t = CE.toLocal(timeClient.getEpochTime());
-		byte h = (t / 3600) % 24;
-		byte m = (t / 60) % 60;
-		byte s = t % 60;
+		//byte h = (t / 3600) % 24;
+		//byte m = (t / 60) % 60;
+		//byte s = t % 60;
+		tmElements_t tm;
+		breakTime(t, tm);
 
 		String message = htmlHeader;
 		message += "<hr>";
 		message += "<form action=/savesettings>";
-		message += "HOURS<br><input name=hours value=";
+		message += "HOURS<br><input name=hour value=";
 		//message += timeClient.getHours();
-		message += h;
+		//message += h;
+		message += tm.Hour;
 		message += "><br>";
-		message += "<br>MINUTES<br><input name=minutes value=";
+		message += "<br>MINUTES<br><input name=minute value=";
 		//message += timeClient.getMinutes();
-		message += m;
+		//message += m;
+		message += tm.Minute;
 		message += "><br>";
-		message += "<br>SECONDS<br><input name=seconds value=";
+		message += "<br>SECONDS<br><input name=second value=";
 		//message += timeClient.getSeconds();
-		message += s;
+		//message += s;
+		message += tm.Second;
 		message += "><br>";
 		message += "<br>YEAR<br><input name=year value=";
+		message += tm.Year + 1970;
 		message += "><br>";
 		message += "<br>MONTH<br><input name=month value=";
+		message += tm.Month;
 		message += "><br>";
 		message += "<br>DAY<br><input name=day value=";
+		message += tm.Day;
 		message += "><br><br>";
 		message += "<button type=submit name=cmd value=settime>SET TIME</button>";
 		message += "</form>";
@@ -1129,21 +1150,43 @@ void setup() {
 		String message = htmlHeader;
 		if(httpServer.arg("cmd").equals("settime")) {
 			int offset = CE.toUTC(0) - CE.toLocal(0);
-			//Serial.println(offset);
-			unsigned long h=(unsigned long)httpServer.arg("hours").toInt();// + offset / 3600;
-			unsigned long m=(unsigned long)httpServer.arg("minutes").toInt();// + offset / 60;
-			unsigned long s=(unsigned long)httpServer.arg("seconds").toInt();// + offset;
+			Serial.print("Time offset: ");
+			Serial.println(offset);
+
+			//unsigned long h=(unsigned long)httpServer.arg("hour").toInt();// + offset / 3600;
+			//unsigned long m=(unsigned long)httpServer.arg("minute").toInt();// + offset / 60;
+			//unsigned long s=(unsigned long)httpServer.arg("second").toInt();// + offset;
+			//unsigned long year=(unsigned long)httpServer.arg("year").toInt();
+			//unsigned long month=(unsigned long)httpServer.arg("month").toInt();
+			//unsigned long day=(unsigned long)httpServer.arg("day").toInt();
+
+			tmElements_t tm;
+			tm.Second = (unsigned long)httpServer.arg("second").toInt();
+			tm.Minute = (unsigned long)httpServer.arg("minute").toInt();
+			tm.Hour = (unsigned long)httpServer.arg("hour").toInt() + offset / 3600;;
+			tm.Day = (unsigned long)httpServer.arg("day").toInt();
+			tm.Month = (unsigned long)httpServer.arg("month").toInt();
+			tm.Year = (unsigned long)httpServer.arg("year").toInt() - 1970;
+			time_t t = makeTime(tm);// + offset;
+
+			/*
 			Serial.println("Old time:");
 			Serial.println(timeClient.getEpochTime());
 			Serial.println(timeClient.getFormattedTime());
-			timeClient.setEpochTime((h * 3600 + m * 60 + s) - timeClient.getEpochTime());// + offset);
+			Serial.println("Set time:");
+			Serial.println(t);
 			Serial.println("New time:");
 			Serial.println(timeClient.getEpochTime());
 			Serial.println(timeClient.getFormattedTime());
-			Serial.println(h);
-			Serial.println(m);
-			Serial.println(s);
-			Serial.println(h * 3600 + m * 60 + s);
+			*/
+
+			//timeClient.setEpochTime((h * 3600L + m * 60L + s) - timeClient.getEpochTime()) + offset);
+			timeClient.setEpochTime(t);
+
+			//Serial.println(h);
+			//Serial.println(m);
+			//Serial.println(s);
+			//Serial.println(h * 3600 + m * 60 + s);
 			message += "TIME SET";
 		}
 
@@ -1369,8 +1412,11 @@ void loopComm(void *pvParameters) {
 		if(isSD) {
 			DRAWMESSAGE(display, "SD LOG ...");
 			int fileIndex = 0;
-			String path = "/" + String(fileIndex) + ".csv";
+			//String path = "/" + String(fileIndex) + ".csv";
+
 			time_t t = CE.toLocal(timeClient.getEpochTime());
+			String path = "/" + String(year(t)) + "-" + int2string(month(t)) + "-" + int2string(day(t)) + ".csv";
+
 
 			String message = String(year(t)) + "-" + int2string(month(t)) + "-" + int2string(day(t)) + " " + int2string(hour(t)) + ":" + int2string(minute(t)) + ":" + int2string(second(t)) + ";"
 					+ String(bitRead(devices[DEV_ALARM_MAX].flags, OUTPUT_BIT) | bitRead(devices[DEV_ALARM_MIN].flags, OUTPUT_BIT)) + ";"
@@ -1378,7 +1424,7 @@ void loopComm(void *pvParameters) {
 			Serial.print(message);
 			errorSD = false;
 			if(!SD.exists(path)) {
-				File file = SD.open(path, FILE_APPEND);
+				File file = SD.open(path, FILE_WRITE);
 				if(file) {
 					file.print("DATE TIME;ALARMS;LEVEL[mm];A: " + String(devices[0].name) + ";B: " + String(devices[1].name) +";C: " + String(devices[2].name) + ";D: " + String(devices[3].name) + ";MQTT\n");
 					file.close();
@@ -1400,7 +1446,7 @@ void loopComm(void *pvParameters) {
 				 }
 				 else {
 					 errorSD = true;
-					 Serial.println("Append failed");
+					 Serial.println("Failed to append file");
 				 }
 				 file.close();
 			}
@@ -1628,22 +1674,29 @@ void loop() {
   		//}
   		calcKD(devices[DEV_LEV_CAL], &levelK, &levelD);
 
-  		float x = analogRead(A0, SAMPLES);
-  		level = x * levelK + levelD;
+  		levelRaw = analogRead(A0, SAMPLES);
+  		levelRawFiltered.Filter(levelRaw);
+  		levelRaw = levelRawFiltered.Current();
+
+  		level = levelRaw * levelK + levelD;
+
+  		/*
   		Serial.print("k: ");
   		Serial.print(levelK);
   		Serial.print(", d: ");
   		Serial.print(levelD);
   		Serial.print(", x: ");
-  		Serial.print(x);
+  		Serial.print(levelRaw);
   		Serial.print(", y: ");
   		Serial.println(level);
-
+  		 */
 
   		if(!mqttLock.test_and_set()) {
   			mqttClient.loop();
+  			/*
   			Serial.print("MQTT: ");
   			Serial.println(mqttClient.connected());
+  			*/
   			errorConn = !mqttClient.connected();
   			mqttLock.clear();
   		}
@@ -1718,7 +1771,7 @@ void loop() {
 				}
 
 				//TODO: run once
-			    byte levelOn = 0;
+			    int levelOn = 0;
 				levelOn = devices[DEV_ALARM_MAX].par1;
 				if(!bitRead(devices[i].flags, RUNONCE_BIT)) {
 					if((level > levelOn) && levelOn) {
@@ -1738,16 +1791,16 @@ void loop() {
 						valveOpenSecCounters[i] = 0;
 			  		}
 				}
-			}
 
-			byte levelOff = 0;
-			levelOff = devices[DEV_ALARM_MIN].par1;
-			if((level <= levelOff) && levelOff) {
-				//Serial.println(String(i) + ": offLevel");
-				bitClear(devices[i].flags, RUNONCE_BIT);
-				bitClear(devices[i].flags, MANUAL_BIT);
-				bitClear(devices[i].flags, OUTPUT_BIT);
-				valveOpenSecCounters[i] = 0;
+				int levelOff = 0;
+				levelOff = devices[DEV_ALARM_MIN].par1;
+				if((level <= levelOff) && levelOff) {
+					Serial.println(String(i) + ": offLevel");
+					bitClear(devices[i].flags, RUNONCE_BIT);
+					bitClear(devices[i].flags, MANUAL_BIT);
+					bitClear(devices[i].flags, OUTPUT_BIT);
+					valveOpenSecCounters[i] = 0;
+				}
 			}
 			if(i == DEV_ALARM_MAX) {
 				if(level >= devices[i].par3 && devices[i].par3) {

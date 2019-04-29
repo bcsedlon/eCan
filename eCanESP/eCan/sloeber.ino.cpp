@@ -2,7 +2,7 @@
 //This is a automatic generated file
 //Please do not modify this file
 //If you touch this file your change will be overwritten during the next build
-//This file has been generated on 2018-10-26 04:24:15
+//This file has been generated on 2019-04-29 17:46:32
 
 #include "Arduino.h"
 #include "Arduino.h"
@@ -29,6 +29,8 @@ extern WebServer httpServer;
 #include <FS.h>
 #include "libraries/SD/src/SD.h"
 #include <SPI.h>
+#include "libraries/filter.h"
+extern ExponentialFilter<float> levelRawFiltered;
 #define LED0_PIN 16
 #define CONFIG_WIFI_PIN 27
 #define INPUT1_PIN 14
